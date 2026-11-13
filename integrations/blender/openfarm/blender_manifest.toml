@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+schema_version = "1.0.0"
+
+id = "openfarm"
+version = "0.1.0"
+name = "OpenFarm"
+tagline = "Send scenes to the OpenFarm render farm"
+maintainer = "OpenFarm contributors"
+type = "add-on"
+website = "https://github.com/carlesllavata/OpenFarm"
+tags = ["Render"]
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+network = "Sends the scene and the job to the OpenFarm app running on this computer (127.0.0.1)"
+files = "Saves a copy of the scene to upload it"

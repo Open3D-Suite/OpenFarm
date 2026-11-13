@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[workspace]
+members = ["crates/core"]
+resolver = "2"
+
+[package]
+name = "openfarm"
+version = "0.1.0"
+edition = "2021"
+description = "Local render farm for 3ds Max and Blender (V-Ray, Corona, FStorm, Cycles, Eevee)"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/carlesllavata/OpenFarm"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "openfarm"
+path = "src/lib.rs"
+
+[[bin]]
+name = "OpenFarm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = { version = "0.8.9", features = ["ws", "multipart"] }
+base64 = "0.23.1"
+blake3 = "1.8.7"
+futures-util = "0.3.34"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "exr"] }
+nvml-wrapper = "0.13.0"
+openfarm-core = { path = "crates/core" }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "stream", "rustls"] }
+rfd = "0.18.0"
+rusqlite = { version = "0.42.0", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sysinfo = "0.40.3"
+tao = "0.37.2"
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-tungstenite = "0.30.0"
+tokio-util = { version = "0.7.20", features = ["io"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.29.2", features = ["v4"] }
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"] }
+wry = "0.57.2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[build-dependencies]
+winresource = "0.1.34"

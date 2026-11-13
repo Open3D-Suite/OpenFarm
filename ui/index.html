@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenFarm</title>
+<link rel="icon" href="/icon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><img src="/icon.svg" alt=""><span>OpenFarm</span><small id="farmName"></small></div>
+  <nav id="tabs">
+    <button data-page="jobs" data-t="tab_jobs">Jobs</button>
+    <button data-page="machines" data-t="tab_machines">Machines</button>
+    <button data-page="submit" data-t="tab_submit">Submit</button>
+    <button data-page="me" data-t="tab_me">This machine</button>
+  </nav>
+  <div class="status" id="connStatus"></div>
+</header>
+<main id="main"></main>
+<div id="modal" class="modal hidden"><div class="modal-box"><button class="modal-close" aria-label="Close">×</button><div id="modalBody"></div></div></div>
+<div id="toast" class="toast hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>

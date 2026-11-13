@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<ApplicationPackage
+    SchemaVersion="1.0"
+    AutodeskProduct="3ds Max"
+    ProductType="Application"
+    Name="OpenFarm"
+    Description="Send 3ds Max scenes to the OpenFarm render farm."
+    AppVersion="0.1.0"
+    ProductCode="{3F1C6E2A-8B47-4D0E-9C1A-5E7B2D9F4A61}"
+    UpgradeCode="{A84D2C17-6E3B-4F95-B0C8-1D7E5A3F9B22}">
+    <CompanyDetails Name="OpenFarm contributors" />
+    <RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="2025" SeriesMax="2099" />
+    <Components Description="macroscripts parts">
+        <RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="2025" SeriesMax="2099" />
+        <ComponentEntry AppName="OpenFarm" Version="0.1.0" ModuleName="./Contents/macroscripts/OpenFarm.mcr" />
+    </Components>
+    <Components Description="post-start-up scripts parts">
+        <RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="2025" SeriesMax="2099" />
+        <ComponentEntry AppName="OpenFarm" Version="0.1.0" ModuleName="./Contents/scripts/OpenFarm_bundle.ms" />
+    </Components>
+</ApplicationPackage>
