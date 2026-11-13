@@ -5,7 +5,7 @@ on every machine of the office or the studio, checks every frame and shows the p
 No accounts, no licence keys, no cloud. Part of the [Open3D](https://github.com/carlesllavata/Open3D)
 suite of open-source tools for 3D work.
 
-**Version 0.1.0** – in development, not released yet.
+**Version 0.1.0** – the first release.
 
 Engines: **Corona**, **V-Ray**, **V-Ray GPU** and **FStorm** in 3ds Max; **Cycles** (CPU, CUDA, OptiX, HIP,
 oneAPI) and **Eevee** in Blender.
@@ -37,9 +37,17 @@ oneAPI) and **Eevee** in Blender.
 
 ## Install
 
-OpenFarm is a single program for Windows 10/11 (64-bit). Releases will be installable with the
-[Open3D launcher](https://github.com/carlesllavata/Open3D) or by hand from the releases page:
-unzip `openfarm-<version>-windows-x64.zip` anywhere and run `OpenFarm.exe`.
+OpenFarm is a single program for Windows 10/11 (64-bit), installed on every computer of the farm. Two
+ways:
+
+- **With the [Open3D launcher](https://github.com/carlesllavata/Open3D)** (0.3.3 or later): press
+  *Install* on OpenFarm's card. It goes in `%LOCALAPPDATA%\Programs\Open3D\OpenFarm`, with shortcuts in
+  the Start menu and on the desktop, and the launcher updates it and removes it.
+- **By hand**: download `openfarm-<version>-windows-x64.zip` from the
+  [releases page](https://github.com/carlesllavata/OpenFarm/releases/latest), unzip it anywhere and run
+  `OpenFarm.exe`.
+
+Every computer of a farm should run the same version of OpenFarm.
 
 The first time, OpenFarm asks what this computer does:
 
@@ -79,7 +87,8 @@ paths.
   on one machine.
 - Workstations render whenever they are active: there is no idle detection or schedule yet (suspend a
   machine from its window or from *Machines*).
-- FStorm and V-Ray were not tested on a licensed machine yet.
+- Tested so far with Corona and Cycles. V-Ray, V-Ray GPU and FStorm are supported but were not tried on a
+  licensed machine yet, and Eevee not through the farm yet: report what you find.
 - The connection between machines is not encrypted; use OpenFarm on a trusted local network only.
 - Windows only.
 
@@ -93,7 +102,8 @@ paths.
 
 ## Uninstall
 
-Quit OpenFarm and delete its folder, `%LOCALAPPDATA%\OpenFarm`,
+Quit OpenFarm (*This machine > Quit OpenFarm*), then remove it with the launcher (or delete its folder),
+and delete `%LOCALAPPDATA%\OpenFarm`,
 `%APPDATA%\Autodesk\ApplicationPlugins\OpenFarm.bundle` and the Blender add-on
 (*Preferences > Get Extensions > OpenFarm > Uninstall*).
 

@@ -2,9 +2,10 @@
 
 What changed for users in each version of OpenFarm, newest first.
 
-## In development
+## 0.1.0 — 13 November 2026
 
-The first version: a render farm for 3ds Max and Blender on your own computers.
+The first release: a render farm for 3ds Max and Blender on your own computers. Tested with Corona
+and Cycles; V-Ray, V-Ray GPU, FStorm and Eevee are supported but not tried through the farm yet.
 
 - **One program for the whole farm.** The first start asks whether this computer runs the farm or joins
   one; machines find the farm on the network and join after the farm approves them.
