@@ -5,7 +5,7 @@ resolver = "2"
 
 [package]
 name = "openfarm"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Local render farm for 3ds Max and Blender (V-Ray, Corona, FStorm, Cycles, Eevee)"
 license = "GPL-3.0-or-later"

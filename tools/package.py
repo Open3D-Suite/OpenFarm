@@ -7,7 +7,8 @@
 Writes dist/openfarm-<version>-windows-x64.zip (OpenFarm.exe, README.md, LICENSE,
 CHANGELOG.md and THIRD-PARTY-LICENSES.txt) and dist/SHA256SUMS.txt. Refuses to build when the version in Cargo.toml
 is not the one the README and the changelog talk about, or when a library has a licence that
-cannot be distributed under GPL-3.0-or-later.
+cannot be distributed under GPL-3.0-or-later. The release build keeps the folders of the machine
+it runs on out of the program, and the program is checked for them before it is packed.
 
 Only the standard library is used, so any Python 3.9+ works.
 """
@@ -50,9 +51,9 @@ def cargo():
     fail("cargo was not found")
 
 
-def run(*args):
+def run(*args, env=None):
     print(">", " ".join(str(a) for a in args), flush=True)
-    result = subprocess.run([str(a) for a in args], cwd=ROOT)
+    result = subprocess.run([str(a) for a in args], cwd=ROOT, env=env)
     if result.returncode != 0:
         fail(f"{args[1]} failed")
 
@@ -138,16 +139,72 @@ def target_dir():
     return Path(json.loads(out.stdout)["target_directory"])
 
 
+def cargo_home():
+    return os.environ.get("CARGO_HOME") or str(Path(os.environ.get("USERPROFILE", "")) / ".cargo")
+
+
+def release_environment():
+    """The environment of the release build.
+
+    rustc writes the full path of every source file that can panic into the program, and for the
+    libraries that is the cargo home of whoever built it, inside their user folder. Those paths are
+    cut down to "cargo\\..." and "target\\...", so the published program says nothing of the machine
+    it was built on. They go in CARGO_ENCODED_RUSTFLAGS because such folders may have spaces in
+    their names.
+    """
+    flags = [f"--remap-path-prefix={cargo_home()}=cargo", f"--remap-path-prefix={target_dir()}=target"]
+    env = dict(os.environ)
+    if env.get("CARGO_ENCODED_RUSTFLAGS"):
+        flags = env["CARGO_ENCODED_RUSTFLAGS"].split("\x1f") + flags
+    elif env.get("RUSTFLAGS"):
+        flags = env.pop("RUSTFLAGS").split() + flags
+    env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(flags)
+    # A library that compiles C code (aws-lc) writes the paths of its sources too (__FILE__), and
+    # rustc's flags do not reach the C compiler. MSVC is told to trim the same folders, in both
+    # spellings Windows has for them: a build script may hand over the short one when the path has
+    # spaces. The flags are quoted for the cc crate (CC_SHELL_ESCAPED_FLAGS) for the same reason.
+    folders = dict.fromkeys([cargo_home(), short_path(cargo_home()), str(target_dir())])
+    trims = " ".join("'/d1trimfile:%s\\'" % folder for folder in folders)
+    env["CFLAGS"] = (env.get("CFLAGS", "") + " " + trims).strip()
+    env["CC_SHELL_ESCAPED_FLAGS"] = "1"
+    return env
+
+
+def short_path(path):
+    """The 8.3 spelling of a path, or the path itself where there is none."""
+    import ctypes
+    buffer = ctypes.create_unicode_buffer(1024)
+    got = ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, len(buffer))
+    return buffer.value if 0 < got < len(buffer) else str(path)
+
+
+def check_no_local_paths(exe):
+    """Refuses a program that still names a folder of this machine."""
+    data = exe.read_bytes().lower()
+    # ROOT may be the \\server\share spelling of a mapped drive: look for both spellings.
+    here = Path(os.path.abspath(__file__)).parent.parent
+    profile = os.environ.get("USERPROFILE", "")
+    folders = {profile, short_path(profile), cargo_home(), short_path(cargo_home()), str(ROOT), str(here),
+               str(target_dir())}
+    for folder in sorted(folders):
+        if len(folder) < 4:
+            continue
+        for encoding in ("utf-8", "utf-16-le"):
+            if folder.lower().encode(encoding) in data:
+                fail(f"{exe.name} still contains the path of a folder of this machine: {folder}")
+
+
 def main():
     ver = version()
     check_documents(ver)
     notices = third_party(ver)
     if "--no-test" not in sys.argv:
         run(cargo(), "test", "--workspace", "--locked")
-    run(cargo(), "build", "--release", "--locked")
+    run(cargo(), "build", "--release", "--locked", env=release_environment())
     exe = target_dir() / "release" / "OpenFarm.exe"
     if not exe.exists():
         fail(f"{exe} was not built")
+    check_no_local_paths(exe)
     said = subprocess.run([str(exe), "--version"], capture_output=True, text=True).stdout.strip()
     if said != f"OpenFarm {ver}":
         fail(f"the executable says '{said}', not 'OpenFarm {ver}'")

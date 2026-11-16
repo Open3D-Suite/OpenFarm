@@ -2,6 +2,11 @@
 
 What changed for users in each version of OpenFarm, newest first.
 
+## 0.1.1 — 16 November 2026
+
+- **The program no longer names folders of the computer it was built on.** Earlier builds
+  carried the full paths of their source files inside `OpenFarm.exe`. Nothing else changes.
+
 ## 0.1.0 — 13 November 2026
 
 The first release: a render farm for 3ds Max and Blender on your own computers. Tested with Corona
