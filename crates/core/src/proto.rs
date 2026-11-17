@@ -84,7 +84,7 @@ pub enum ServerMsg {
         server_version: String,
         protocol: u32,
     },
-    Assign(Assignment),
+    Assign(Box<Assignment>),
     Cancel {
         task: u64,
     },

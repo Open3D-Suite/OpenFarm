@@ -714,7 +714,7 @@ impl Farm {
         let Some(job) = self.jobs.get_mut(&a.job) else { return };
         let Some(m) = self.machines.get(&a.machine) else { return };
         let Some(tx) = m.tx.clone() else { return };
-        let msg = ServerMsg::Assign(Assignment {
+        let msg = ServerMsg::Assign(Box::new(Assignment {
             task: id,
             job: job.id,
             job_name: job.spec.name.clone(),
@@ -728,7 +728,7 @@ impl Farm {
             resolution: job.spec.resolution,
             settings: job.spec.settings.clone(),
             slot: a.slot,
-        });
+        }));
         if tx.send(msg).is_err() {
             return;
         }

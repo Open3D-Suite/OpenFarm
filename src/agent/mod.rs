@@ -187,7 +187,7 @@ pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus, identity: Arc
                             let task_id = a.task;
                             let done_tx = ctx.out.clone();
                             tokio::spawn(async move {
-                                runner::run(ctx2, a, slot, gpu, token).await;
+                                runner::run(ctx2, *a, slot, gpu, token).await;
                                 st.lock().unwrap().tasks.retain(|t| t.task != task_id);
                                 // Tell the loop the slot is free (a Status message does it).
                                 let _ = done_tx.send(AgentMsg::Status { telemetry: Default::default(), accepting: true });
