@@ -3,6 +3,7 @@
 //! machine runs depending on its role: the farm server, the agent that renders, and the window.
 
 pub mod agent;
+pub mod auth;
 pub mod config;
 pub mod discovery;
 pub mod imaging;
