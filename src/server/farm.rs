@@ -299,7 +299,7 @@ impl Farm {
                         again.push(f.frame);
                     }
                 }
-                again.extend(job.pending.drain(..));
+                again.append(&mut job.pending);
                 job.pending = again;
                 job.excluded.clear();
                 job.failures.clear();
@@ -770,7 +770,7 @@ impl Farm {
 
     pub fn state_view(&self) -> StateView {
         let mut jobs: Vec<JobView> = self.jobs.values().map(|j| self.job_summary(j)).collect();
-        jobs.sort_by(|a, b| b.id.cmp(&a.id));
+        jobs.sort_by_key(|a| std::cmp::Reverse(a.id));
         let machines = self
             .machines
             .values()

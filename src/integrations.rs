@@ -2,7 +2,7 @@
 //! The 3ds Max button and the Blender add-on that send jobs. They are built into OpenFarm.exe and
 //! installed from the window (This machine > Integrations), so they always match this version.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -24,7 +24,7 @@ fn appdata() -> Result<PathBuf> {
     std::env::var_os("APPDATA").map(PathBuf::from).ok_or_else(|| anyhow!("APPDATA is not set"))
 }
 
-fn write_all(dir: &PathBuf, files: &[(&str, &str)]) -> Result<()> {
+fn write_all(dir: &Path, files: &[(&str, &str)]) -> Result<()> {
     for (rel, text) in files {
         let path = dir.join(rel);
         std::fs::create_dir_all(path.parent().unwrap())?;
