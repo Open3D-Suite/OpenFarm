@@ -29,8 +29,9 @@ pub struct StoredJob {
 pub struct StoredMachine {
     pub id: String,
     pub name: String,
-    /// SHA-256 of the public key the machine was approved with. It recognises the machine and
-    /// cannot be used to act as it.
+    /// SHA-256 of the public key the machine first connected with: its id belongs to that key,
+    /// whether it is approved yet or not. It recognises the machine and cannot be used to act
+    /// as it.
     pub fingerprint: Option<String>,
     pub approved: bool,
     pub enabled: bool,

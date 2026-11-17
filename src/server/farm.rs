@@ -18,6 +18,11 @@ use tokio::sync::{mpsc, watch};
 use super::db::{Db, StoredJob, StoredMachine};
 use crate::config::{now_ms, VERSION};
 
+/// What a machine is told when it comes with the id of a machine the farm knows and another key.
+pub const ANOTHER_KEY: &str = "The farm already knows this machine with another key and does not take this one in its place. \
+     If this computer lost its key (OpenFarm was installed again, or runs as another Windows user), forget the machine in Machines \
+     on the farm's computer: it can then join and be approved as a new one.";
+
 /// A frame is retried on other machines this many times before it counts as failed.
 pub const MAX_ATTEMPTS: u32 = 3;
 /// A machine that fails this many tasks of one job stops getting that job.
@@ -80,10 +85,10 @@ pub struct LiveTask {
 pub struct MachineEntry {
     pub id: String,
     pub name: String,
-    /// Fingerprint of the public key the server trusts (set on approval).
+    /// Fingerprint of the public key this machine first connected with. The machine id belongs to
+    /// that key from then on, approved or not, until the machine is forgotten. `None` only for a
+    /// machine that has not connected since the farm stopped keeping keys (a 0.1.1 farm).
     pub fingerprint: Option<String>,
-    /// Fingerprint of the key the machine proved to hold on its last connection.
-    pub offered_fingerprint: String,
     pub approved: bool,
     pub enabled: bool,
     pub accepting: bool,
@@ -192,7 +197,6 @@ impl Farm {
                     id: m.id,
                     name: m.name,
                     fingerprint: m.fingerprint,
-                    offered_fingerprint: String::new(),
                     approved: m.approved,
                     enabled: m.enabled,
                     accepting: true,
@@ -359,11 +363,12 @@ impl Farm {
         let m = self.machines.get_mut(id).ok_or_else(|| anyhow!("no machine {id}"))?;
         match action {
             "approve" => {
-                if m.offered_fingerprint.is_empty() {
-                    bail!("the machine is not connected; it can be approved when it is");
+                // Approving never chooses a key: it is the one the machine first connected with,
+                // which is the one this entry has been showing as waiting.
+                if m.fingerprint.is_none() {
+                    bail!("the machine has not connected yet; it can be approved when it does");
                 }
                 m.approved = true;
-                m.fingerprint = Some(m.offered_fingerprint.clone());
                 if let Some(tx) = &m.tx {
                     let _ = tx.send(ServerMsg::Welcome {
                         approved: true,
@@ -398,13 +403,23 @@ impl Farm {
         Ok(())
     }
 
-    /// A machine connected. Returns whether it is approved.
-    pub fn hello(&mut self, h: Hello, conn: u64, tx: mpsc::UnboundedSender<ServerMsg>) -> bool {
+    /// A machine connected, having proved that it holds the key `h.fingerprint`. Returns whether
+    /// it is approved, or the reason the farm does not take it.
+    ///
+    /// A machine id belongs to the key that first connected with it, until the machine is
+    /// forgotten. The same id with another key is somebody else, or the same computer after it
+    /// lost its key: it is turned away and nothing about the machine the farm knows changes. So
+    /// nobody can take a machine's place, un-approve it, or get a key of their own approved under
+    /// its name.
+    pub fn hello(&mut self, h: Hello, conn: u64, tx: mpsc::UnboundedSender<ServerMsg>) -> Result<bool, String> {
+        let known = self.machines.get(&h.machine_id).and_then(|m| m.fingerprint.as_deref());
+        if known.is_some_and(|key| key != h.fingerprint) {
+            return Err(ANOTHER_KEY.to_string());
+        }
         let m = self.machines.entry(h.machine_id.clone()).or_insert_with(|| MachineEntry {
             id: h.machine_id.clone(),
             name: h.name.clone(),
             fingerprint: None,
-            offered_fingerprint: String::new(),
             approved: false,
             enabled: true,
             accepting: true,
@@ -423,18 +438,16 @@ impl Farm {
         m.version = h.version;
         m.rank = h.rank;
         m.address = h.address;
-        m.offered_fingerprint = h.fingerprint.clone();
+        // The first connection of a machine binds its id to its key (kept on disk, also while it
+        // waits for approval); every later one has just been checked against it.
+        m.fingerprint = Some(h.fingerprint);
         m.last_seen = now_ms();
         m.conn = conn;
         m.tx = Some(tx);
         m.warm_job = None;
-        if m.fingerprint.as_deref() != Some(h.fingerprint.as_str()) {
-            m.approved = false;
-        }
         // The server's own agent needs no approval.
-        if h.loopback && !m.approved {
+        if h.loopback {
             m.approved = true;
-            m.fingerprint = Some(h.fingerprint);
         }
         let approved = m.approved;
         let stored = m.stored();
@@ -442,7 +455,7 @@ impl Farm {
         tracing::info!(machine = %stored.name, approved, "machine connected");
         self.dispatch();
         self.bump();
-        approved
+        Ok(approved)
     }
 
     pub fn status(&mut self, id: &str, telemetry: Telemetry, accepting: bool) {

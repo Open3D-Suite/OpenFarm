@@ -130,8 +130,12 @@ impl Config {
         }
         if let Err(e) = cfg.identity() {
             if !cfg.private_key.is_empty() {
-                // Settings copied from another computer or another user: the key in them is not ours.
-                tracing::warn!("this machine's key cannot be read ({e:#}); it gets a new one and the farm has to approve it again");
+                // Settings from another Windows user or another computer: the key in them is not
+                // ours to read. The farm knows this machine by that key and turns the new one away
+                // until the owner lets the old machine go.
+                tracing::warn!(
+                    "this machine's key cannot be read ({e:#}); it gets a new one. The farm will refuse it until this machine is forgotten in Machines on the farm's computer; after that it can join and be approved again"
+                );
             }
             cfg.private_key = protected(&Identity::generate()?)?;
             save = true;

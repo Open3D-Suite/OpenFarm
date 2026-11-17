@@ -519,7 +519,22 @@ async fn agent_session(s: ServerState, socket: WebSocket, addr: SocketAddr, rank
     let farm_name = s.farm.lock().unwrap().name.clone();
     // Welcome goes first so the agent knows where it stands before any assignment.
     let _ = tx.send(ServerMsg::Welcome { approved: false, server_name: farm_name.clone(), server_version: VERSION.into(), protocol: PROTOCOL });
-    let approved = s.farm.lock().unwrap().hello(hello, conn, tx.clone());
+    let taken = s.farm.lock().unwrap().hello(hello, conn, tx.clone());
+    let approved = match taken {
+        Ok(approved) => approved,
+        Err(error) => {
+            // The id of a machine the farm knows, with another key: it is told why and what to
+            // do, and the machine the farm knows is left as it is.
+            static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            if crate::loopback::once_a_second(&LAST) {
+                tracing::warn!(from = %addr.ip(), machine = %machine, "a machine came with the id of a known machine and another key: turned away");
+            }
+            if let Ok(text) = serde_json::to_string(&ServerMsg::Error { error }) {
+                let _ = sink.send(Message::Text(text.into())).await;
+            }
+            return;
+        }
+    };
     if approved {
         let _ = tx.send(ServerMsg::Welcome { approved: true, server_name: farm_name, server_version: VERSION.into(), protocol: PROTOCOL });
     }
@@ -594,25 +609,35 @@ mod tests {
         let (approved, pending) = (Identity::generate().unwrap(), Identity::generate().unwrap());
         {
             let mut farm = state.farm.lock().unwrap();
-            connect(&mut farm, "a", &approved, 1);
-            connect(&mut farm, "p", &pending, 2);
+            assert_eq!(connect(&mut farm, "a", &approved, 1), Ok(false));
+            assert_eq!(connect(&mut farm, "p", &pending, 2), Ok(false));
             farm.machine_action("a", "approve").unwrap();
         }
         (state, approved, pending)
     }
 
-    fn connect(farm: &mut Farm, id: &str, identity: &Identity, conn: u64) -> bool {
-        let hello = Hello {
+    /// What a machine that connects from the network presents: its id, its name, the key it proved.
+    fn hello(id: &str, name: &str, identity: &Identity) -> Hello {
+        Hello {
             machine_id: id.into(),
-            name: id.to_uppercase(),
+            name: name.into(),
             fingerprint: identity.fingerprint(),
             version: VERSION.into(),
             caps: Default::default(),
             rank: 1,
             address: "192.168.2.20".into(),
             loopback: false,
-        };
-        farm.hello(hello, conn, mpsc::unbounded_channel().0)
+        }
+    }
+
+    fn connect(farm: &mut Farm, id: &str, identity: &Identity, conn: u64) -> Result<bool, String> {
+        farm.hello(hello(id, &id.to_uppercase(), identity), conn, mpsc::unbounded_channel().0)
+    }
+
+    /// Everything about a machine that somebody else's connection must leave alone.
+    fn seen(farm: &Farm, id: &str) -> (String, Option<String>, bool, u64, bool, String, String) {
+        let m = &farm.machines[id];
+        (m.name.clone(), m.fingerprint.clone(), m.approved, m.conn, m.online(), m.address.clone(), m.version.clone())
     }
 
     fn request(method: &str, target: &str, body: &'static [u8], signed: Option<&Signed>) -> Request {
@@ -665,15 +690,16 @@ mod tests {
             let signed = identity.sign("GET", "/api/v1/state", &empty).unwrap();
             assert_eq!(check(&state, "GET", "/api/v1/state", EMPTY, &signed).await, expected);
         }
-        // Approving the waiting machine lets it in; a machine that comes back with another key
-        // is out until it is approved again, and so is one the farm forgot.
+        // Approving the waiting machine lets it in. Somebody who comes with an approved machine's
+        // id and another key gets nothing and takes nothing from that machine. A machine the farm
+        // forgot is out.
         state.farm.lock().unwrap().machine_action("p", "approve").unwrap();
         let signed = p.sign("GET", "/api/v1/state", &empty).unwrap();
         assert_eq!(check(&state, "GET", "/api/v1/state", EMPTY, &signed).await, Ok(()));
-        assert!(!connect(&mut state.farm.lock().unwrap(), "a", &stranger, 3));
-        for identity in [&a, &stranger] {
+        assert!(connect(&mut state.farm.lock().unwrap(), "a", &stranger, 3).is_err());
+        for (identity, expected) in [(&a, Ok(())), (&stranger, Err(AuthError::NotApproved))] {
             let signed = identity.sign("GET", "/api/v1/state", &empty).unwrap();
-            assert_eq!(check(&state, "GET", "/api/v1/state", EMPTY, &signed).await, Err(AuthError::NotApproved));
+            assert_eq!(check(&state, "GET", "/api/v1/state", EMPTY, &signed).await, expected);
         }
         {
             let mut farm = state.farm.lock().unwrap();
@@ -786,28 +812,126 @@ mod tests {
         assert!(!farm.trusts_fingerprint(""));
         // The server's own agent (loopback) needs no approval.
         let own = Identity::generate().unwrap();
-        let hello = Hello {
-            machine_id: "own".into(),
-            name: "SERVER".into(),
-            fingerprint: own.fingerprint(),
-            version: VERSION.into(),
-            caps: Default::default(),
-            rank: 2,
-            address: "127.0.0.1".into(),
-            loopback: true,
-        };
-        assert!(farm.hello(hello, 9, mpsc::unbounded_channel().0));
+        let from_here = |identity: &Identity| Hello { address: "127.0.0.1".into(), loopback: true, rank: 2, ..hello("own", "SERVER", identity) };
+        assert_eq!(farm.hello(from_here(&own), 9, mpsc::unbounded_channel().0), Ok(true));
         assert!(farm.trusts_fingerprint(&own.fingerprint()));
+        // Not even from this computer does another key take a known machine's id.
+        let other = Identity::generate().unwrap();
+        assert!(farm.hello(from_here(&other), 10, mpsc::unbounded_channel().0).is_err());
+        assert!(farm.trusts_fingerprint(&own.fingerprint()) && !farm.trusts_fingerprint(&other.fingerprint()));
         drop(farm);
         // What the farm keeps on disk is the fingerprint: after a restart the same machines are
-        // trusted, and one that never proved a key cannot be approved.
+        // trusted, and the one that was waiting is still waiting, with its key.
         drop(state);
         let state = ServerState::new(&Config::new(), dir.path()).unwrap();
-        let mut farm = state.farm.lock().unwrap();
+        let farm = state.farm.lock().unwrap();
         assert!(farm.trusts_fingerprint(&a.fingerprint()) && farm.trusts_fingerprint(&own.fingerprint()));
         assert!(!farm.trusts_fingerprint(&p.fingerprint()));
-        assert!(farm.machine_action("p", "approve").is_err());
-        assert!(!farm.machines["p"].approved);
+        assert_eq!(farm.machines["p"].fingerprint, Some(p.fingerprint()));
+    }
+
+    #[test]
+    fn a_machine_id_with_another_key_changes_nothing() {
+        let dir = TestDir::new();
+        let (state, a, p) = farm(&dir);
+        let impostor = Identity::generate().unwrap();
+        let mut farm = state.farm.lock().unwrap();
+
+        // The id of the approved machine, which is connected, with somebody else's key and name.
+        let before = seen(&farm, "a");
+        let refused = farm.hello(hello("a", "IMPOSTOR", &impostor), 7, mpsc::unbounded_channel().0).unwrap_err();
+        assert!(refused.contains("another key") && refused.contains("forget the machine in Machines"), "{refused}");
+        assert_eq!(seen(&farm, "a"), before);
+        assert_eq!(before, ("A".to_string(), Some(a.fingerprint()), true, 1, true, "192.168.2.20".to_string(), VERSION.to_string()));
+        assert!(farm.trusts_fingerprint(&a.fingerprint()) && !farm.trusts_fingerprint(&impostor.fingerprint()));
+        // The owner pressing Approve after that approves nothing new.
+        farm.machine_action("a", "approve").unwrap();
+        assert_eq!(seen(&farm, "a"), before);
+        assert!(!farm.trusts_fingerprint(&impostor.fingerprint()));
+
+        // The same for a machine that is still waiting: its entry keeps the key it came with, and
+        // that is the only key Approve can approve.
+        let before = seen(&farm, "p");
+        assert!(farm.hello(hello("p", "P", &impostor), 8, mpsc::unbounded_channel().0).is_err());
+        assert_eq!(seen(&farm, "p"), before);
+        farm.machine_action("p", "approve").unwrap();
+        assert_eq!(farm.machines["p"].fingerprint, Some(p.fingerprint()));
+        assert!(farm.trusts_fingerprint(&p.fingerprint()) && !farm.trusts_fingerprint(&impostor.fingerprint()));
+
+        // The machine itself comes back with its own key as always.
+        assert_eq!(connect(&mut farm, "a", &a, 9), Ok(true));
+        assert_eq!(farm.machines["a"].conn, 9);
+        // And the impostor is as welcome as anybody under an id of its own: waiting for approval.
+        assert_eq!(connect(&mut farm, "i", &impostor, 10), Ok(false));
+        assert!(!farm.trusts_fingerprint(&impostor.fingerprint()));
+    }
+
+    #[test]
+    fn a_machine_that_lost_its_key_joins_again_once_it_is_forgotten() {
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let new_key = Identity::generate().unwrap();
+        let mut farm = state.farm.lock().unwrap();
+        // The computer went offline and comes back with a new key: turned away.
+        farm.disconnected("a", 1);
+        assert_eq!(connect(&mut farm, "a", &new_key, 2), Err(farm::ANOTHER_KEY.to_string()));
+        assert!(!farm.machines["a"].online());
+        // The owner forgets the machine; now it enrols like a new one and waits for approval.
+        farm.machine_action("a", "forget").unwrap();
+        assert_eq!(connect(&mut farm, "a", &new_key, 3), Ok(false));
+        assert!(!farm.trusts_fingerprint(&new_key.fingerprint()) && !farm.trusts_fingerprint(&a.fingerprint()));
+        farm.machine_action("a", "approve").unwrap();
+        assert!(farm.trusts_fingerprint(&new_key.fingerprint()) && !farm.trusts_fingerprint(&a.fingerprint()));
+        // From now on the id belongs to the new key, and the old one is the one turned away.
+        assert!(connect(&mut farm, "a", &a, 4).is_err());
+        assert_eq!(farm.machines["a"].conn, 3);
+    }
+
+    #[test]
+    fn the_key_of_a_waiting_machine_is_kept_across_a_restart() {
+        let dir = TestDir::new();
+        let (state, _, p) = farm(&dir);
+        let impostor = Identity::generate().unwrap();
+        drop(state);
+        // After a restart nobody is connected. Whoever comes first under the waiting machine's id
+        // must still be the machine that was waiting.
+        let state = ServerState::new(&Config::new(), dir.path()).unwrap();
+        let mut farm = state.farm.lock().unwrap();
+        assert!(connect(&mut farm, "p", &impostor, 1).is_err());
+        assert!(!farm.machines["p"].online());
+        farm.machine_action("p", "approve").unwrap();
+        assert!(farm.trusts_fingerprint(&p.fingerprint()) && !farm.trusts_fingerprint(&impostor.fingerprint()));
+        assert_eq!(connect(&mut farm, "p", &p, 2), Ok(true));
+    }
+
+    #[test]
+    fn a_machine_the_farm_has_no_key_for_is_bound_by_its_first_connection() {
+        let dir = TestDir::new();
+        // What a farm made by 0.1.1 is left with once its keys are erased: machines without one.
+        drop(ServerState::new(&Config::new(), dir.path()).unwrap());
+        db::Db::open(&dir.path().join("server/farm.sqlite"))
+            .unwrap()
+            .save_machine(&db::StoredMachine {
+                id: "old".into(),
+                name: "NODE-07".into(),
+                fingerprint: None,
+                approved: false,
+                enabled: true,
+                caps: Default::default(),
+                rank: 0,
+                last_seen: 0,
+            })
+            .unwrap();
+        let state = ServerState::new(&Config::new(), dir.path()).unwrap();
+        let mut farm = state.farm.lock().unwrap();
+        let (first, second) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        // No key yet, so nothing to approve.
+        assert!(farm.machine_action("old", "approve").is_err());
+        assert!(!farm.machines["old"].approved);
+        assert_eq!(connect(&mut farm, "old", &first, 1), Ok(false));
+        assert!(connect(&mut farm, "old", &second, 2).is_err());
+        farm.machine_action("old", "approve").unwrap();
+        assert!(farm.trusts_fingerprint(&first.fingerprint()) && !farm.trusts_fingerprint(&second.fingerprint()));
     }
 
     /// The farm served on a loopback port of its own. Send on the returned channel to stop it.

@@ -111,10 +111,17 @@ OpenFarm is made for a local network you trust. What it protects, and what it do
   first time it starts. The private key never leaves the machine: every request is signed with it, the
   signature is good for that one request only, and a copy of a request sent again is refused. The farm
   keeps just a fingerprint of each machine's public key, so nothing in its database lets anybody pass
-  for a machine.
+  for a machine. A machine's place in the farm belongs to the key it first joined with: whoever comes
+  as that machine with another key is turned away, and the machine keeps its approval and its
+  connection.
 - **The key is protected on each machine.** It is stored in `config.json` encrypted by Windows for the
   user who runs OpenFarm (DPAPI). A copy of the file is useless on another computer or for another
-  user; a machine set up from such a copy makes a new key and asks for approval again.
+  user: OpenFarm started from such a copy makes a new key, and the farm turns it away because it
+  knows that machine by the old one.
+- **A machine that lost its key joins again as a new one.** When OpenFarm is installed again or runs
+  as another Windows user, the machine has a new key and the farm does not take it in place of the
+  old one; its window says so. On the farm's computer, *Forget* the machine in *Machines*: it then
+  joins as a new machine, waiting for approval.
 - **Clocks must agree.** A signature is accepted for five minutes, so the clocks of the farm's computers
   must be within five minutes of each other (Windows keeps them in time by itself). A machine whose
   clock is off is told so.

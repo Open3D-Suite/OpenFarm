@@ -29,6 +29,12 @@ machines again on the farm's computer (*Machines*).
   the farm, quit OpenFarm and, with a trick, reach everything else. Requests from the computer itself
   are now served only to OpenFarm's window, the 3ds Max and Blender buttons and scripts.
 
+- **A machine cannot be pushed aside by another one.** A machine's place in the farm now belongs to the
+  key it first joined with. A computer that joins claiming to be a machine the farm already knows, with
+  another key, is turned away and told why; the real machine keeps its approval and its connection, and
+  *Approve* can no longer approve the newcomer in its place. A machine that really lost its key joins
+  again once it is forgotten in *Machines*.
+
 The traffic between machines is still not encrypted: see *Security* in the README.
 
 ## 0.1.1 — 16 November 2026
