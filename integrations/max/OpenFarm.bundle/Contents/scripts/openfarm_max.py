@@ -68,11 +68,12 @@ def call(path, body=None, data=None, headers=None):
     if body is not None:
         data = json.dumps(body).encode()
         headers = {"content-type": "application/json"}
-    req = urllib.request.Request(
+    # The address always starts with LOCAL: the OpenFarm of this computer, over http.
+    req = urllib.request.Request(  # noqa: S310
         LOCAL + path, data=data, headers=headers or {}, method="POST" if data is not None else "GET"
     )
     try:
-        with urllib.request.urlopen(req, timeout=600) as r:
+        with urllib.request.urlopen(req, timeout=600) as r:  # noqa: S310
             return json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
         raise RuntimeError(e.read().decode(errors="replace") or str(e)) from e

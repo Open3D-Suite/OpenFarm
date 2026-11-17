@@ -17,8 +17,9 @@ import urllib.request
 
 def call(base, path, body=None):
     data = None if body is None else json.dumps(body).encode()
-    req = urllib.request.Request(base + path, data=data, headers={"content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
+    # The address is the one this test is given on its command line.
+    req = urllib.request.Request(base + path, data=data, headers={"content-type": "application/json"})  # noqa: S310
+    with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
         return json.loads(r.read() or b"null")
 
 

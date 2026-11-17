@@ -61,9 +61,10 @@ def load(cmd):
     original = cmd.get("original_dir") or ""
     if original:
         # Bitmaps saved with paths relative to the scene's own folder are found there.
+        # On purpose: if the folder cannot be added, the scene is loaded all the same.
         try:
             rt.mapPaths.add(original)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110
             pass
     t0 = time.time()
     ok = rt.loadMaxFile(cmd["scene"], quiet=True, useFileUnits=True)
@@ -116,9 +117,10 @@ def render(cmd):
             missingDLLsAction=rt.Name("logmsg"),
         )
         if bmp is not None:
+            # On purpose: whether the frame was rendered is decided below, by the file it wrote.
             try:
                 rt.close(bmp)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
         if os.path.exists(path) and os.path.getsize(path) > 0:
             send(ev="frame_done", frame=frame, secs=time.time() - t0)

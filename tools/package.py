@@ -70,7 +70,8 @@ def cargo():
 
 def run(*args, env=None):
     print(">", " ".join(str(a) for a in args), flush=True)
-    result = subprocess.run([str(a) for a in args], cwd=ROOT, env=env)
+    # Only cargo, with the arguments written in this script.
+    result = subprocess.run([str(a) for a in args], cwd=ROOT, env=env)  # noqa: S603
     if result.returncode != 0:
         fail(f"{args[1]} failed")
 
@@ -100,7 +101,8 @@ def licence_terms(expression):
 
 def third_party(ver):
     """Checks every library's licence and gathers their licence texts in one file."""
-    out = subprocess.run(
+    # cargo, with the arguments written here.
+    out = subprocess.run(  # noqa: S603
         [cargo(), "metadata", "--format-version", "1", "--filter-platform", TARGET, "--locked"],
         cwd=ROOT,
         capture_output=True,
@@ -156,7 +158,8 @@ def third_party(ver):
 
 
 def target_dir():
-    out = subprocess.run(
+    # cargo, with the arguments written here.
+    out = subprocess.run(  # noqa: S603
         [cargo(), "metadata", "--format-version", "1", "--no-deps"],
         cwd=ROOT,
         capture_output=True,
@@ -240,7 +243,8 @@ def main():
     if not exe.exists():
         fail(f"{exe} was not built")
     check_no_local_paths(exe)
-    said = subprocess.run([str(exe), "--version"], capture_output=True, text=True).stdout.strip()
+    # The program this script has just built.
+    said = subprocess.run([str(exe), "--version"], capture_output=True, text=True).stdout.strip()  # noqa: S603
     if said != f"OpenFarm {ver}":
         fail(f"the executable says '{said}', not 'OpenFarm {ver}'")
 

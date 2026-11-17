@@ -68,9 +68,10 @@ def remap_relative(original_dir):
             new = os.path.normpath(os.path.join(original_dir, path[2:].replace("/", os.sep)))
             block.filepath = new
             if collection is bpy.data.libraries:
+                # On purpose: a library that cannot be reloaded is left as it is and the scene goes on loading.
                 try:
                     block.reload()
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001, S110
                     pass
             count += 1
     return count
