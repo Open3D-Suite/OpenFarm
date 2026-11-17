@@ -205,7 +205,8 @@ class Window(QtWidgets.QWidget):
             return self.say("Choose an output folder.", False)
         if len(folder) > 1 and folder[1] == ":" and folder[0].upper() == "C":
             return self.say(
-                "The output folder is on this computer's C: drive; other machines can't write there. Use a shared folder.",
+                "The output folder is on this computer's C: drive; other machines can't write there. "
+                "Use a shared folder.",
                 False,
             )
         original = os.path.join(str(rt.maxFilePath), str(rt.maxFileName)) if rt.maxFileName else ""
