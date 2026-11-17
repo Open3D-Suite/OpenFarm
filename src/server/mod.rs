@@ -50,6 +50,8 @@ pub struct ServerState {
     agent_replay: Arc<Mutex<ReplayGuard>>,
     /// The folders other machines may send scenes from by path (`scene_folders` in the settings).
     scene_folders: Arc<Vec<PathBuf>>,
+    /// The port the server listens on: requests from this computer must be addressed to it.
+    port: u16,
 }
 
 pub type ApiError = (StatusCode, String);
@@ -92,6 +94,7 @@ impl ServerState {
             replay: Arc::new(Mutex::new(ReplayGuard::new(500_000))),
             agent_replay: Arc::new(Mutex::new(ReplayGuard::new(20_000))),
             scene_folders: Arc::new(scene_folders),
+            port: cfg.server_port,
         })
     }
 }
@@ -136,7 +139,25 @@ pub fn router(state: ServerState) -> Router {
         .merge(api)
         .route("/api/v1/agent", get(agent_ws))
         .merge(crate::ui::routes())
+        .layer(middleware::from_fn_with_state(state.clone(), keep_pages_out))
         .with_state(state)
+}
+
+/// Requests from this computer are trusted, so the ones a web page open in a browser on this
+/// computer could send are turned away first, whatever they ask for (see `crate::loopback`).
+/// Requests from the network go on to be checked for their signature.
+async fn keep_pages_out(
+    State(s): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+    next: Next,
+) -> Response {
+    if addr.ip().is_loopback() {
+        if let Err(refused) = crate::loopback::check(req.headers(), req.uri(), s.port) {
+            return crate::loopback::refuse(refused);
+        }
+    }
+    next.run(req).await
 }
 
 async fn require_trust(
@@ -158,9 +179,8 @@ async fn require_trust(
 /// nobody can fill the disk by knocking.
 fn refuse(addr: SocketAddr, e: AuthError) -> Response {
     static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let second = now_ms() / 1000;
     // A browser that is not part of the farm asks all the time: not worth a line.
-    if e != AuthError::Missing && LAST.swap(second, std::sync::atomic::Ordering::Relaxed) != second {
+    if e != AuthError::Missing && crate::loopback::once_a_second(&LAST) {
         tracing::warn!(from = %addr.ip(), "refused: {e}");
     }
     e.into_response()
@@ -788,6 +808,96 @@ mod tests {
         assert!(!farm.trusts_fingerprint(&p.fingerprint()));
         assert!(farm.machine_action("p", "approve").is_err());
         assert!(!farm.machines["p"].approved);
+    }
+
+    /// The farm served on a loopback port of its own. Send on the returned channel to stop it.
+    async fn farm_on_a_port(dir: &TestDir) -> (u16, ServerState, tokio::sync::oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut state = ServerState::new(&Config::new(), dir.path()).unwrap();
+        state.port = port;
+        let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let served = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).with_graceful_shutdown(async { drop(stopped.await) }).await;
+        });
+        (port, state, stop, served)
+    }
+
+    #[tokio::test]
+    async fn the_server_keeps_web_pages_out_of_what_it_trusts_from_this_computer() {
+        use crate::loopback::tests::send;
+        let dir = TestDir::new();
+        let (port, state, stop, served) = farm_on_a_port(&dir).await;
+        let own = format!("127.0.0.1:{port}");
+        let host = ("Host", own.as_str());
+        let by_name = format!("localhost:{port}");
+        let origin = format!("http://localhost:{port}");
+        let json = ("Content-Type", "application/json");
+        let scenes = || std::fs::read_dir(dir.path().join("server/scenes")).unwrap().count();
+
+        // The local app relaying its user's requests, a script, the server's own agent: trusted
+        // from this computer as before, with no `Origin` to show.
+        assert_eq!(send(port, "GET /api/v1/state", &[host], "").await.0, 200);
+        let (status, scene) = send(port, "POST /api/v1/scenes?name=shot.max", &[host], "a scene").await;
+        assert!(status == 200 && scene.contains("\"file_name\":\"shot.max\""), "{status} {scene}");
+        let stored = scenes();
+        // The farm page opened in a browser on this computer.
+        let page = [("Host", by_name.as_str()), ("Sec-Fetch-Site", "none")];
+        assert_eq!(send(port, "GET /", &page, "").await.0, 200);
+        let from_page = [("Host", by_name.as_str()), ("Origin", origin.as_str()), ("Sec-Fetch-Site", "same-origin"), json];
+        assert_eq!(send(port, "GET /api/v1/state", &from_page, "").await.0, 200);
+        assert_eq!(send(port, "POST /api/v1/machines/nobody/action", &from_page, r#"{"action":"enable"}"#).await.0, 400);
+
+        // Any other page open in a browser on this computer.
+        let rebound = format!("evil.example:{port}");
+        let pages: [&[(&str, &str)]; 7] = [
+            &[host, ("Origin", "http://evil.example")],
+            &[host, ("Origin", "null")],
+            // The window's own page is another origin for the server: it never calls it directly.
+            &[host, ("Origin", "http://127.0.0.1:47102")],
+            &[host, ("Sec-Fetch-Site", "cross-site")],
+            &[host, ("Sec-Fetch-Site", "same-site")],
+            &[("Host", rebound.as_str()), ("Sec-Fetch-Site", "same-origin")],
+            &[("Host", "192.168.2.10:47100")],
+        ];
+        for page in pages {
+            for (request, body) in [
+                ("GET /api/v1/state", ""),
+                ("GET /api/v1/jobs/1", ""),
+                ("POST /api/v1/scenes?name=junk.max", "junk"),
+                ("POST /api/v1/scenes/from-path", r#"{"path":"C:\\Windows\\win.ini"}"#),
+                ("POST /api/v1/machines/nobody/action", r#"{"action":"approve"}"#),
+                ("POST /api/v1/jobs", "{}"),
+                ("GET /api/v1/scenes/0000000000000000000000000000000000000000000000000000000000000000", ""),
+                ("GET /api/v1/agent", ""),
+                ("OPTIONS /api/v1/jobs", ""),
+                ("GET /", ""),
+                ("GET /app.js", ""),
+                ("GET /nothing-here", ""),
+            ] {
+                let mut headers = page.to_vec();
+                if !body.is_empty() {
+                    headers.push(json);
+                }
+                let (status, text) = send(port, request, &headers, body).await;
+                assert_eq!(status, 403, "{request} with {page:?}: {text}");
+            }
+        }
+        assert_eq!(scenes(), stored, "a refused upload was stored");
+        // A page can open WebSockets to anywhere, but its browser names it: refused before the
+        // signature is even looked at. From a program of this computer the signature is what counts.
+        let socket = [("Connection", "Upgrade"), ("Upgrade", "websocket"), ("Sec-WebSocket-Version", "13"), ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")];
+        let mut from_page = vec![host, ("Origin", "http://evil.example")];
+        from_page.extend(socket);
+        assert_eq!(send(port, "GET /api/v1/agent", &from_page, "").await.0, 403);
+        let mut unsigned = vec![host];
+        unsigned.extend(socket);
+        assert_eq!(send(port, "GET /api/v1/agent", &unsigned, "").await.0, 426);
+
+        let _ = stop.send(());
+        let _ = served.await;
+        drop(state);
     }
 
     /// Folders and files to ask for: `scenes` is the allowed folder, the rest is not.

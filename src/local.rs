@@ -48,6 +48,9 @@ pub async fn bind(port: u16) -> std::io::Result<tokio::net::TcpListener> {
 }
 
 pub async fn serve(listener: tokio::net::TcpListener, state: LocalState) -> Result<()> {
+    // Everything here is for this computer's own programs: a page open in a browser is kept out
+    // before any of it runs (see `crate::loopback`).
+    let port = listener.local_addr()?.port();
     let app = Router::new()
         .route("/local/info", get(info))
         .route("/local/setup", post(setup))
@@ -58,6 +61,7 @@ pub async fn serve(listener: tokio::net::TcpListener, state: LocalState) -> Resu
         .route("/local/install/{target}", post(install))
         .merge(crate::ui::routes())
         .fallback(proxy)
+        .layer(axum::middleware::from_fn_with_state(port, crate::loopback::guard))
         .with_state(state);
     axum::serve(listener, app).await?;
     Ok(())
@@ -273,6 +277,96 @@ fn is_stored(answer: &[u8], sent: &blake3::Hash) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loopback::tests::send;
+    use crate::TestDir;
+
+    /// A local app on a port of its own, and what it asks the window to do.
+    async fn local_app(dir: &TestDir) -> (u16, tokio::sync::mpsc::UnboundedReceiver<Control>) {
+        let listener = bind(0).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (control, asked) = tokio::sync::mpsc::unbounded_channel();
+        let state = LocalState {
+            cfg: Arc::new(Mutex::new(Config::new())),
+            data: dir.path().to_path_buf(),
+            agent: Default::default(),
+            identity: Arc::new(Identity::generate().unwrap()),
+            http: reqwest::Client::new(),
+            control,
+        };
+        tokio::spawn(serve(listener, state));
+        (port, asked)
+    }
+
+    #[tokio::test]
+    async fn the_local_app_answers_programs_and_its_window_but_no_web_page() {
+        let dir = TestDir::new();
+        let (port, mut asked) = local_app(&dir).await;
+        let own = format!("127.0.0.1:{port}");
+        let host = ("Host", own.as_str());
+        let origin = format!("http://127.0.0.1:{port}");
+
+        // A script, the 3ds Max and Blender buttons, a second start of OpenFarm: no `Origin`.
+        let (status, info) = send(port, "GET /local/info", &[host], "").await;
+        assert_eq!(status, 200, "{info}");
+        assert!(info.contains("\"role\":\"unset\""), "{info}");
+        assert_eq!(send(port, "POST /local/show", &[host], "").await.0, 200);
+        assert!(matches!(asked.try_recv(), Ok(Control::Show)));
+        // A farm request goes on to the relay (which has no farm to send it to in this test).
+        assert_eq!(send(port, "GET /api/v1/state", &[host], "").await.0, 503);
+        // The window: the page comes from this very address, and the browser says so.
+        let (status, page) = send(port, "GET /", &[host, ("Sec-Fetch-Site", "none")], "").await;
+        assert!(status == 200 && page.contains("<html"), "{status}");
+        let window = [host, ("Origin", origin.as_str()), ("Sec-Fetch-Site", "same-origin")];
+        assert_eq!(send(port, "GET /local/info", &window, "").await.0, 200);
+        assert_eq!(send(port, "POST /local/show", &window, "").await.0, 200);
+        assert!(matches!(asked.try_recv(), Ok(Control::Show)));
+        let by_name = format!("localhost:{port}");
+        assert_eq!(send(port, "GET /local/info", &[("Host", by_name.as_str())], "").await.0, 200);
+
+        // A page open in a browser on this computer, in every way it can show up.
+        let rebound = format!("evil.example:{port}");
+        let pages: [&[(&str, &str)]; 8] = [
+            &[host, ("Origin", "http://evil.example")],
+            &[host, ("Origin", "null")],
+            &[host, ("Origin", "http://127.0.0.1:8080")],
+            &[host, ("Sec-Fetch-Site", "cross-site")],
+            &[host, ("Sec-Fetch-Site", "same-site")],
+            &[host, ("Origin", "http://evil.example"), ("Sec-Fetch-Site", "cross-site")],
+            // DNS rebinding: for the browser this is the page's own origin.
+            &[("Host", rebound.as_str()), ("Sec-Fetch-Site", "same-origin")],
+            &[("Host", "evil.example")],
+        ];
+        let setup = r#"{"role":"server","farm_name":"Taken over"}"#;
+        for page in pages {
+            for (request, body) in [
+                ("POST /local/quit", ""),
+                ("POST /local/show", ""),
+                ("POST /local/accepting", r#"{"accepting":false}"#),
+                ("POST /local/setup", setup),
+                ("GET /local/info", ""),
+                ("GET /local/discover", ""),
+                ("POST /api/v1/scenes?name=junk.max", "junk"),
+                ("POST /api/v1/jobs", "{}"),
+                ("GET /api/v1/state", ""),
+                ("OPTIONS /local/quit", ""),
+                ("GET /", ""),
+                ("GET /app.js", ""),
+                ("GET /nothing-here", ""),
+            ] {
+                let mut headers = page.to_vec();
+                if !body.is_empty() {
+                    headers.push(("Content-Type", "application/json"));
+                }
+                let (status, text) = send(port, request, &headers, body).await;
+                assert_eq!(status, 403, "{request} with {page:?}: {text}");
+                assert!(text.contains("only answers its own window"), "{text}");
+            }
+        }
+        // None of it reached a handler: the window was asked nothing and the settings are as they were.
+        assert!(asked.try_recv().is_err());
+        assert!(send(port, "GET /local/info", &[host], "").await.1.contains("\"role\":\"unset\""));
+        assert!(!dir.path().join("config.json").exists());
+    }
 
     #[test]
     fn an_upload_counts_only_if_the_farm_stored_what_was_sent() {

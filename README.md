@@ -124,6 +124,10 @@ OpenFarm is made for a local network you trust. What it protects, and what it do
   `"scene_folders": ["\\\\server\\projects", "D:\\scenes"]` (quit OpenFarm, edit the file, start it
   again). The list is empty at first: other computers send scenes from 3ds Max or Blender, or from
   *Submit* on the farm's computer, which takes any path.
+- **Web pages are kept out.** On each computer OpenFarm answers that computer's own programs without a
+  key: its window, the 3ds Max and Blender buttons, scripts. A page open in a browser is not one of
+  them. What a browser sends for a page of another site, or to another name than `127.0.0.1` or
+  `localhost`, is refused before OpenFarm does anything with it.
 - **Not protected: the traffic itself.** Nothing is encrypted. Scenes, previews, logs and commands
   travel in clear, so anybody on the network can read them, and somebody able to change traffic on its
   way can still tamper with what is not signed (the farm's answers, the scenes the machines download,

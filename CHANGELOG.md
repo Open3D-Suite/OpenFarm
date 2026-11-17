@@ -24,6 +24,11 @@ machines again on the farm's computer (*Machines*).
 - **Clearer messages when versions do not match.** A 0.1.1 machine that tries to join gets "Upgrade
   Required", and a machine turned away by the farm shows the farm's reason.
 
+- **Web pages cannot use OpenFarm behind your back.** OpenFarm answers the programs of its own computer
+  without a key. A page open in a browser on that computer could send it requests too: upload files to
+  the farm, quit OpenFarm and, with a trick, reach everything else. Requests from the computer itself
+  are now served only to OpenFarm's window, the 3ds Max and Blender buttons and scripts.
+
 The traffic between machines is still not encrypted: see *Security* in the README.
 
 ## 0.1.1 — 16 November 2026
