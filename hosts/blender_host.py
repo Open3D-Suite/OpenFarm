@@ -13,6 +13,7 @@ says {"ev": "ready", "token": t} and then runs one JSON command per line, ending
      "settings": {"samples": n, "persistent": true}}
     {"op": "quit"}
 """
+
 import json
 import os
 import socket
@@ -22,7 +23,7 @@ import traceback
 
 import bpy
 
-argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
 PORT = int(argv[argv.index("--port") + 1])
 TOKEN = argv[argv.index("--token") + 1]
 
@@ -49,8 +50,15 @@ def remap_relative(original_dir):
     if not original_dir:
         return 0
     count = 0
-    for collection in (bpy.data.images, bpy.data.sounds, bpy.data.movieclips, bpy.data.volumes,
-                       bpy.data.cache_files, bpy.data.fonts, bpy.data.libraries):
+    for collection in (
+        bpy.data.images,
+        bpy.data.sounds,
+        bpy.data.movieclips,
+        bpy.data.volumes,
+        bpy.data.cache_files,
+        bpy.data.fonts,
+        bpy.data.libraries,
+    ):
         for block in collection:
             path = getattr(block, "filepath", "")
             if not path or not path.startswith("//"):

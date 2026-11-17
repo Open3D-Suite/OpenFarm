@@ -127,10 +127,8 @@ mod tests {
 
     #[test]
     fn messages_round_trip() {
-        let m = AgentMsg::Task {
-            task: 7,
-            event: TaskEvent::FrameDone { frame: 3, secs: 1.5, files: vec!["a.exr".into()], thumb: None, warning: None },
-        };
+        let m =
+            AgentMsg::Task { task: 7, event: TaskEvent::FrameDone { frame: 3, secs: 1.5, files: vec!["a.exr".into()], thumb: None, warning: None } };
         let s = serde_json::to_string(&m).unwrap();
         assert!(s.contains("\"type\":\"task\"") && s.contains("\"kind\":\"frame_done\""), "{s}");
         assert_eq!(serde_json::from_str::<AgentMsg>(&s).unwrap(), m);
@@ -153,9 +151,6 @@ mod tests {
         assert_eq!(serde_json::from_str::<AgentMsg>(&s).unwrap(), hello);
         // What the server sends when it refuses an agent is a message the agent can read.
         let refusal = r#"{"type":"error","error":"protocol 1 is not 2: update OpenFarm"}"#;
-        assert_eq!(
-            serde_json::from_str::<ServerMsg>(refusal).unwrap(),
-            ServerMsg::Error { error: "protocol 1 is not 2: update OpenFarm".into() }
-        );
+        assert_eq!(serde_json::from_str::<ServerMsg>(refusal).unwrap(), ServerMsg::Error { error: "protocol 1 is not 2: update OpenFarm".into() });
     }
 }

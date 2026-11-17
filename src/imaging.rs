@@ -5,7 +5,7 @@
 use std::io::Cursor;
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use image::{DynamicImage, ImageFormat};
 
 pub struct Inspection {

@@ -6,11 +6,9 @@
 use std::ffi::c_void;
 
 use anyhow::{Context, Result};
+use windows::Win32::Foundation::{HLOCAL, LocalFree};
+use windows::Win32::Security::Cryptography::{CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData};
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{LocalFree, HLOCAL};
-use windows::Win32::Security::Cryptography::{
-    CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-};
 
 /// Mixed into the encryption, so a blob made for something else is not taken for an OpenFarm key.
 const PURPOSE: &[u8] = b"OpenFarm machine key";
@@ -39,16 +37,8 @@ pub fn protect(secret: &[u8]) -> Result<Vec<u8>> {
     // SAFETY: the input blobs point at slices that outlive the call and are only read; `out` is
     // filled by Windows and released in `take`.
     unsafe {
-        CryptProtectData(
-            &blob(secret),
-            PCWSTR::null(),
-            Some(&blob(PURPOSE)),
-            None,
-            None,
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut out,
-        )
-        .context("Windows could not protect this machine's key")?;
+        CryptProtectData(&blob(secret), PCWSTR::null(), Some(&blob(PURPOSE)), None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
+            .context("Windows could not protect this machine's key")?;
         Ok(take(out))
     }
 }
@@ -58,16 +48,8 @@ pub fn unprotect(protected: &[u8]) -> Result<Vec<u8>> {
     let mut out = CRYPT_INTEGER_BLOB::default();
     // SAFETY: as in `protect`.
     unsafe {
-        CryptUnprotectData(
-            &blob(protected),
-            None,
-            Some(&blob(PURPOSE)),
-            None,
-            None,
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut out,
-        )
-        .context("Windows could not read this machine's key (it was protected by another user or on another computer)")?;
+        CryptUnprotectData(&blob(protected), None, Some(&blob(PURPOSE)), None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
+            .context("Windows could not read this machine's key (it was protected by another user or on another computer)")?;
         Ok(take(out))
     }
 }

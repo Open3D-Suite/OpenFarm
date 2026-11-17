@@ -26,15 +26,15 @@
 //! `UNSIGNED-PAYLOAD` is only for the scene upload, whose body is sent as it is read and can be many
 //! gigabytes: see `crate::local` for how that one is checked.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use axum::http::header::UPGRADE;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 
@@ -143,13 +143,7 @@ impl Identity {
     }
 
     /// A request to the farm server with this machine's signature on it.
-    pub fn request(
-        &self,
-        http: &reqwest::Client,
-        method: reqwest::Method,
-        url: reqwest::Url,
-        content: &str,
-    ) -> Result<reqwest::RequestBuilder> {
+    pub fn request(&self, http: &reqwest::Client, method: reqwest::Method, url: reqwest::Url, content: &str) -> Result<reqwest::RequestBuilder> {
         let signed = self.sign(method.as_str(), &target(&url), content)?;
         let mut request = http.request(method, url);
         for (name, value) in signed.headers() {

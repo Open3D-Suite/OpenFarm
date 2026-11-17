@@ -16,21 +16,21 @@ use anyhow::Result;
 use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path as UrlPath, Query, Request, State};
-use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use openfarm_core::model::{JobSpec, SceneRef};
-use openfarm_core::proto::{AgentMsg, ServerMsg, PROTOCOL};
+use openfarm_core::proto::{AgentMsg, PROTOCOL, ServerMsg};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, watch};
 
 use crate::auth::{self, AuthError, ReplayGuard, Signed};
-use crate::config::{now_ms, Config, VERSION};
+use crate::config::{Config, VERSION, now_ms};
 use farm::{Farm, Hello};
 
 /// The one request whose body is not covered by its signature: a scene upload is passed on while
@@ -146,12 +146,7 @@ pub fn router(state: ServerState) -> Router {
 /// Requests from this computer are trusted, so the ones a web page open in a browser on this
 /// computer could send are turned away first, whatever they ask for (see `crate::loopback`).
 /// Requests from the network go on to be checked for their signature.
-async fn keep_pages_out(
-    State(s): State<ServerState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    req: Request,
-    next: Next,
-) -> Response {
+async fn keep_pages_out(State(s): State<ServerState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, req: Request, next: Next) -> Response {
     if addr.ip().is_loopback() {
         if let Err(refused) = crate::loopback::check(req.headers(), req.uri(), s.port) {
             return crate::loopback::refuse(refused);
@@ -160,12 +155,7 @@ async fn keep_pages_out(
     next.run(req).await
 }
 
-async fn require_trust(
-    State(s): State<ServerState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    req: Request,
-    next: Next,
-) -> Response {
+async fn require_trust(State(s): State<ServerState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, req: Request, next: Next) -> Response {
     if addr.ip().is_loopback() {
         return next.run(req).await;
     }
@@ -259,11 +249,7 @@ struct Action {
     priority: Option<u8>,
 }
 
-async fn api_job_action(
-    State(s): State<ServerState>,
-    UrlPath(id): UrlPath<u64>,
-    Json(a): Json<Action>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+async fn api_job_action(State(s): State<ServerState>, UrlPath(id): UrlPath<u64>, Json(a): Json<Action>) -> Result<Json<serde_json::Value>, ApiError> {
     s.farm.lock().unwrap().job_action(id, &a.action, a.priority).map_err(bad)?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -291,8 +277,7 @@ async fn api_task_log(State(s): State<ServerState>, UrlPath(id): UrlPath<u64>) -
         Ok(bytes) => {
             // The last megabyte is plenty for the UI.
             let start = bytes.len().saturating_sub(1 << 20);
-            ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], String::from_utf8_lossy(&bytes[start..]).into_owned())
-                .into_response()
+            ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], String::from_utf8_lossy(&bytes[start..]).into_owned()).into_response()
         }
         Err(_) => ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], String::new()).into_response(),
     }
@@ -308,11 +293,7 @@ struct UploadQuery {
 }
 
 /// The submitter's snapshot of a scene. Stored by content, so sending the same file twice costs nothing.
-async fn api_scene_upload(
-    State(s): State<ServerState>,
-    Query(q): Query<UploadQuery>,
-    body: Body,
-) -> Result<Json<SceneRef>, ApiError> {
+async fn api_scene_upload(State(s): State<ServerState>, Query(q): Query<UploadQuery>, body: Body) -> Result<Json<SceneRef>, ApiError> {
     let name = safe_file_name(&q.name).ok_or_else(|| bad("bad file name"))?;
     let tmp_dir = s.data.join("scenes").join(".incoming");
     tokio::fs::create_dir_all(&tmp_dir).await.map_err(bad)?;
@@ -602,8 +583,8 @@ async fn discovery(name: String, port: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::Identity;
     use crate::TestDir;
+    use crate::auth::Identity;
 
     const EMPTY: &[u8] = b"";
 
@@ -1042,7 +1023,8 @@ mod tests {
         assert_eq!(scenes(), stored, "a refused upload was stored");
         // A page can open WebSockets to anywhere, but its browser names it: refused before the
         // signature is even looked at. From a program of this computer the signature is what counts.
-        let socket = [("Connection", "Upgrade"), ("Upgrade", "websocket"), ("Sec-WebSocket-Version", "13"), ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")];
+        let socket =
+            [("Connection", "Upgrade"), ("Upgrade", "websocket"), ("Sec-WebSocket-Version", "13"), ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")];
         let mut from_page = vec![host, ("Origin", "http://evil.example")];
         from_page.extend(socket);
         assert_eq!(send(port, "GET /api/v1/agent", &from_page, "").await.0, 403);

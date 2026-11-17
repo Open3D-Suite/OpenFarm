@@ -4,8 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
 use nvml_wrapper::Nvml;
+use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
 use openfarm_core::model::{Capabilities, Gpu, GpuLoad, Software, Telemetry};
 use sysinfo::System;
 
@@ -67,11 +67,7 @@ impl Probe {
                 }
             }
         }
-        Telemetry {
-            cpu_pct: self.sys.global_cpu_usage(),
-            ram_used_mb: self.sys.used_memory() / (1024 * 1024),
-            gpus,
-        }
+        Telemetry { cpu_pct: self.sys.global_cpu_usage(), ram_used_mb: self.sys.used_memory() / (1024 * 1024), gpus }
     }
 }
 
@@ -105,9 +101,7 @@ fn dirs_starting(dir: &Path, prefix: &str) -> Vec<PathBuf> {
 }
 
 fn any_file(dir: &Path, test: impl Fn(&str) -> bool) -> bool {
-    std::fs::read_dir(dir)
-        .map(|r| r.flatten().any(|e| test(&e.file_name().to_string_lossy().to_lowercase())))
-        .unwrap_or(false)
+    std::fs::read_dir(dir).map(|r| r.flatten().any(|e| test(&e.file_name().to_string_lossy().to_lowercase()))).unwrap_or(false)
 }
 
 /// The newest 3ds Max with `3dsmaxbatch.exe` and the Blender to use. A path in the settings wins.
@@ -141,8 +135,7 @@ pub fn find_software(cfg: &Config) -> Vec<Software> {
         if vray_bundle.exists() || plugins.join(format!("vrender{year}.dlr")).exists() {
             out.push(Software { name: "vray".into(), version: year.clone(), path: vray_bundle.to_string_lossy().into_owned() });
         }
-        let fstorm = any_file(&plugins, |n| n.starts_with("fstorm") && n.ends_with(".dlr"))
-            || !dirs_starting(&app_plugins, "fstorm").is_empty();
+        let fstorm = any_file(&plugins, |n| n.starts_with("fstorm") && n.ends_with(".dlr")) || !dirs_starting(&app_plugins, "fstorm").is_empty();
         if fstorm {
             out.push(Software { name: "fstorm".into(), version: year.clone(), path: plugins.to_string_lossy().into_owned() });
         }

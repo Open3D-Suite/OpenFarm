@@ -13,6 +13,7 @@ per line, answering with events and ending every command with {"ev": "done"} or 
 
 Max stays open between commands, so a job's scene is loaded once per machine, not once per frame.
 """
+
 import json
 import os
 import socket
@@ -103,9 +104,17 @@ def render(cmd):
             os.remove(path)
         send(ev="frame_start", frame=frame)
         t0 = time.time()
-        bmp = rt.render(camera=cam, frame=frame, outputfile=path, vfb=False, quiet=True, progressbar=False,
-                        missingExtFilesAction=rt.Name("logmsg"), missingXRefsAction=rt.Name("logmsg"),
-                        missingDLLsAction=rt.Name("logmsg"))
+        bmp = rt.render(
+            camera=cam,
+            frame=frame,
+            outputfile=path,
+            vfb=False,
+            quiet=True,
+            progressbar=False,
+            missingExtFilesAction=rt.Name("logmsg"),
+            missingXRefsAction=rt.Name("logmsg"),
+            missingDLLsAction=rt.Name("logmsg"),
+        )
         if bmp is not None:
             try:
                 rt.close(bmp)
@@ -115,8 +124,11 @@ def render(cmd):
             send(ev="frame_done", frame=frame, secs=time.time() - t0)
         else:
             # Phase 0: a renderer without a licence returns from render() without writing anything.
-            send(ev="frame_failed", frame=frame,
-                 error="3ds Max finished the frame but wrote no image (no renderer licence? see the log)")
+            send(
+                ev="frame_failed",
+                frame=frame,
+                error="3ds Max finished the frame but wrote no image (no renderer licence? see the log)",
+            )
 
 
 send(ev="ready", token=TOKEN, version=list(rt.maxVersion()))

@@ -11,7 +11,7 @@ use std::time::Duration;
 use anyhow::Result;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::{header, HeaderMap, HeaderName, StatusCode};
+use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -277,8 +277,8 @@ fn is_stored(answer: &[u8], sent: &blake3::Hash) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::loopback::tests::send;
     use crate::TestDir;
+    use crate::loopback::tests::send;
 
     /// A local app on a port of its own, and what it asks the window to do.
     async fn local_app(dir: &TestDir) -> (u16, tokio::sync::mpsc::UnboundedReceiver<Control>) {

@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Checks the Blender add-on without a UI: registers it, sends the open scene and waits for the answer.
 
-    set OPENFARM_LOCAL_PORT=47202
-    blender -b scene.blend --python tests/blender_submit.py -- <integrations/blender folder> <output folder>
+set OPENFARM_LOCAL_PORT=47202
+blender -b scene.blend --python tests/blender_submit.py -- <integrations/blender folder> <output folder>
 """
+
 import sys
 import time
 
 import bpy
 
-addon_dir, out = sys.argv[sys.argv.index("--") + 1:][:2]
+addon_dir, out = sys.argv[sys.argv.index("--") + 1 :][:2]
 sys.path.insert(0, addon_dir)
 import openfarm  # noqa: E402
 

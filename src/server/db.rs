@@ -6,9 +6,9 @@ use std::path::Path;
 
 use anyhow::Result;
 use openfarm_core::model::{Capabilities, FrameInfo, JobSpec, JobState, Task};
-use rusqlite::{params, Connection, OptionalExtension};
-use serde::de::DeserializeOwned;
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 pub struct Db {
     conn: Connection,
@@ -172,16 +172,7 @@ impl Db {
             "INSERT INTO machines (id, name, fingerprint, approved, enabled, caps, rank, last_seen)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET name=?2, fingerprint=?3, approved=?4, enabled=?5, caps=?6, rank=?7, last_seen=?8",
-            params![
-                m.id,
-                m.name,
-                m.fingerprint,
-                m.approved as i64,
-                m.enabled as i64,
-                serde_json::to_string(&m.caps)?,
-                m.rank,
-                m.last_seen as i64
-            ],
+            params![m.id, m.name, m.fingerprint, m.approved as i64, m.enabled as i64, serde_json::to_string(&m.caps)?, m.rank, m.last_seen as i64],
         )?;
         Ok(())
     }
@@ -192,9 +183,9 @@ impl Db {
     }
 
     pub fn load_jobs(&self) -> Result<Vec<(StoredJob, Vec<FrameInfo>)>> {
-        let mut st = self.conn.prepare(
-            "SELECT id, spec, state, created, started, finished, error, archived, excluded FROM jobs WHERE archived = 0 ORDER BY id",
-        )?;
+        let mut st = self
+            .conn
+            .prepare("SELECT id, spec, state, created, started, finished, error, archived, excluded FROM jobs WHERE archived = 0 ORDER BY id")?;
         let rows = st.query_map([], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
@@ -230,9 +221,8 @@ impl Db {
     }
 
     fn load_frames(&self, job: u64) -> Result<Vec<FrameInfo>> {
-        let mut st = self.conn.prepare(
-            "SELECT frame, state, task, machine, secs, thumb, warning, attempts FROM frames WHERE job = ?1 ORDER BY frame",
-        )?;
+        let mut st =
+            self.conn.prepare("SELECT frame, state, task, machine, secs, thumb, warning, attempts FROM frames WHERE job = ?1 ORDER BY frame")?;
         let rows = st.query_map(params![job as i64], |r| {
             Ok(FrameInfo {
                 frame: r.get(0)?,
@@ -249,9 +239,7 @@ impl Db {
     }
 
     pub fn load_machines(&self) -> Result<Vec<StoredMachine>> {
-        let mut st = self
-            .conn
-            .prepare("SELECT id, name, fingerprint, approved, enabled, caps, rank, last_seen FROM machines ORDER BY name")?;
+        let mut st = self.conn.prepare("SELECT id, name, fingerprint, approved, enabled, caps, rank, last_seen FROM machines ORDER BY name")?;
         let rows = st.query_map([], |r| {
             Ok(StoredMachine {
                 id: r.get(0)?,
@@ -274,9 +262,8 @@ impl Db {
     }
 
     pub fn task_logs_of_job(&self, job: u64) -> Result<Vec<Task>> {
-        let mut st = self.conn.prepare(
-            "SELECT id, job, frames, machine, slot, state, started, finished, error FROM tasks WHERE job = ?1 ORDER BY id",
-        )?;
+        let mut st =
+            self.conn.prepare("SELECT id, job, frames, machine, slot, state, started, finished, error FROM tasks WHERE job = ?1 ORDER BY id")?;
         let rows = st.query_map(params![job as i64], |r| {
             Ok(Task {
                 id: r.get::<_, i64>(0)? as u64,

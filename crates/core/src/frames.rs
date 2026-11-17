@@ -34,10 +34,7 @@ pub fn parse(text: &str) -> Result<Vec<i32>, FrameError> {
         }
         let (range, step) = match part.split_once(':') {
             Some((r, s)) => {
-                let step: i32 = s
-                    .trim()
-                    .parse()
-                    .map_err(|_| FrameError(format!("'{part}': the step after ':' is not a number")))?;
+                let step: i32 = s.trim().parse().map_err(|_| FrameError(format!("'{part}': the step after ':' is not a number")))?;
                 if step < 1 {
                     return Err(FrameError(format!("'{part}': the step must be 1 or more")));
                 }

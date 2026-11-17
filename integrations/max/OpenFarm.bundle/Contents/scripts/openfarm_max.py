@@ -6,6 +6,7 @@ open file is not touched and keeps its unsaved changes flag), uploads the copy t
 OpenFarm app running on this computer, and creates the job. The upload runs in the background so 3ds Max
 stays usable.
 """
+
 import json
 import os
 import tempfile
@@ -67,7 +68,9 @@ def call(path, body=None, data=None, headers=None):
     if body is not None:
         data = json.dumps(body).encode()
         headers = {"content-type": "application/json"}
-    req = urllib.request.Request(LOCAL + path, data=data, headers=headers or {}, method="POST" if data is not None else "GET")
+    req = urllib.request.Request(
+        LOCAL + path, data=data, headers=headers or {}, method="POST" if data is not None else "GET"
+    )
     try:
         with urllib.request.urlopen(req, timeout=600) as r:
             return json.loads(r.read() or b"null")
@@ -86,7 +89,11 @@ class Sender(QtCore.QObject):
                 size = os.path.getsize(snapshot)
                 with open(snapshot, "rb") as f:
                     q = urllib.parse.urlencode({"name": file_name, "original": original})
-                    scene = call("/api/v1/scenes?" + q, data=f, headers={"content-type": "application/octet-stream", "content-length": str(size)})
+                    scene = call(
+                        "/api/v1/scenes?" + q,
+                        data=f,
+                        headers={"content-type": "application/octet-stream", "content-length": str(size)},
+                    )
                 spec["scene"] = scene
                 job = call("/api/v1/jobs", spec)
                 self.finished.emit("Sent: job %s" % job["id"], True)
@@ -124,9 +131,18 @@ class Window(QtWidgets.QWidget):
         self.chunk.setRange(0, 1000)
         self.chunk.setSpecialValueText("Automatic")
         self.paused = QtWidgets.QCheckBox("Send paused")
-        for label, w in [("Job name", self.name), ("Engine", self.engine), ("Camera", self.camera), ("Frames", self.frames),
-                         ("Output folder", self.folder), ("File name", self.file), ("Format", self.format),
-                         ("Priority", self.priority), ("Frames per task", self.chunk), ("", self.paused)]:
+        for label, w in [
+            ("Job name", self.name),
+            ("Engine", self.engine),
+            ("Camera", self.camera),
+            ("Frames", self.frames),
+            ("Output folder", self.folder),
+            ("File name", self.file),
+            ("Format", self.format),
+            ("Priority", self.priority),
+            ("Frames per task", self.chunk),
+            ("", self.paused),
+        ]:
             form.addRow(label, w)
         self.message = QtWidgets.QLabel()
         self.message.setWordWrap(True)
@@ -159,7 +175,11 @@ class Window(QtWidgets.QWidget):
     def refresh(self):
         self.name.setText(os.path.splitext(str(rt.maxFileName))[0] or "Untitled")
         engine = engine_of_scene()
-        self.engine.setText({"corona": "Corona", "vray": "V-Ray", "vray_gpu": "V-Ray GPU", "fstorm": "FStorm"}.get(engine, "%s (not supported)" % rt.classOf(rt.renderers.current)))
+        self.engine.setText(
+            {"corona": "Corona", "vray": "V-Ray", "vray_gpu": "V-Ray GPU", "fstorm": "FStorm"}.get(
+                engine, "%s (not supported)" % rt.classOf(rt.renderers.current)
+            )
+        )
         self.camera.clear()
         cams = scene_cameras()
         self.camera.addItems(cams)
@@ -184,7 +204,10 @@ class Window(QtWidgets.QWidget):
         if not folder:
             return self.say("Choose an output folder.", False)
         if len(folder) > 1 and folder[1] == ":" and folder[0].upper() == "C":
-            return self.say("The output folder is on this computer's C: drive; other machines can't write there. Use a shared folder.", False)
+            return self.say(
+                "The output folder is on this computer's C: drive; other machines can't write there. Use a shared folder.",
+                False,
+            )
         original = os.path.join(str(rt.maxFilePath), str(rt.maxFileName)) if rt.maxFileName else ""
         file_name = str(rt.maxFileName) or "untitled.max"
         snapshot = os.path.join(tempfile.gettempdir(), "OpenFarm", uuid.uuid4().hex, file_name)
@@ -197,7 +220,11 @@ class Window(QtWidgets.QWidget):
             "engine": engine_of_scene(),
             "frames": self.frames.text().strip(),
             "camera": self.camera.currentText(),
-            "output": {"folder": folder, "name": self.file.text().strip() or "frame_####", "format": self.format.currentText()},
+            "output": {
+                "folder": folder,
+                "name": self.file.text().strip() or "frame_####",
+                "format": self.format.currentText(),
+            },
             "priority": self.priority.value(),
             "chunk": self.chunk.value() or None,
             "settings": {},
@@ -218,6 +245,7 @@ def show():
     global _window
     try:
         import qtmax
+
         parent = qtmax.GetQMaxMainWindow()
     except Exception:  # noqa: BLE001
         parent = None

@@ -6,17 +6,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine as _;
 use futures_util::StreamExt;
 use openfarm_core::model::{Engine, Host};
 use openfarm_core::proto::{AgentMsg, Assignment, TaskEvent};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
-use super::hosts::{progress_of, HostEvent, HostProc};
 use super::AgentCtx;
+use super::hosts::{HostEvent, HostProc, progress_of};
 use crate::imaging;
 
 /// An error of the scene itself (no camera, wrong renderer): every machine would fail the same way.
@@ -97,14 +97,7 @@ pub async fn run(ctx: Arc<AgentCtx>, a: Assignment, slot: String, gpu: Option<u3
     }
 }
 
-async fn run_inner(
-    ctx: &Arc<AgentCtx>,
-    a: &Assignment,
-    slot: &str,
-    gpu: Option<u32>,
-    cancel: &CancellationToken,
-    rep: &mut Reporter,
-) -> Result<()> {
+async fn run_inner(ctx: &Arc<AgentCtx>, a: &Assignment, slot: &str, gpu: Option<u32>, cancel: &CancellationToken, rep: &mut Reporter) -> Result<()> {
     if !openfarm_core::model::is_absolute_path(&a.output.folder) {
         return Err(SceneError(format!("the output folder is not a full path: {}", a.output.folder)).into());
     }
@@ -163,12 +156,8 @@ async fn ensure_scene(ctx: &Arc<AgentCtx>, a: &Assignment, rep: &mut Reporter, c
     tokio::fs::create_dir_all(&dir).await?;
     let started = Instant::now();
     let url = reqwest::Url::parse(&format!("{}{}", ctx.server_url, a.scene_url)).context("the scene's address")?;
-    let resp = ctx
-        .identity
-        .request(&ctx.http, reqwest::Method::GET, url, &crate::auth::sha256_hex(b""))?
-        .send()
-        .await
-        .context("downloading the scene")?;
+    let resp =
+        ctx.identity.request(&ctx.http, reqwest::Method::GET, url, &crate::auth::sha256_hex(b""))?.send().await.context("downloading the scene")?;
     if !resp.status().is_success() {
         let status = resp.status();
         let why = resp.text().await.unwrap_or_default();
@@ -277,12 +266,7 @@ async fn with_host(
             h
         }
     };
-    let watchdog = a
-        .settings
-        .get("watchdog_minutes")
-        .and_then(|v| v.as_f64())
-        .map(|m| Duration::from_secs_f64(m * 60.0))
-        .unwrap_or(DEFAULT_WATCHDOG);
+    let watchdog = a.settings.get("watchdog_minutes").and_then(|v| v.as_f64()).map(|m| Duration::from_secs_f64(m * 60.0)).unwrap_or(DEFAULT_WATCHDOG);
     let result = drive(ctx, a, &mut host, scene, outputs, cancel, rep, watchdog).await;
     match &result {
         Ok(()) => {
@@ -419,10 +403,9 @@ async fn wait_done(
                     let extra = v["extra"].as_array().map(|x| x.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default();
                     on_frame(HostFrame::Done(v["frame"].as_i64().unwrap_or(0) as i32, v["secs"].as_f64().unwrap_or(0.0), extra))?
                 }
-                "frame_failed" => on_frame(HostFrame::Failed(
-                    v["frame"].as_i64().unwrap_or(0) as i32,
-                    v["error"].as_str().unwrap_or("failed").to_string(),
-                ))?,
+                "frame_failed" => {
+                    on_frame(HostFrame::Failed(v["frame"].as_i64().unwrap_or(0) as i32, v["error"].as_str().unwrap_or("failed").to_string()))?
+                }
                 _ => {}
             },
         }
@@ -464,7 +447,8 @@ async fn dummy(
     rep: &mut Reporter,
 ) -> Result<()> {
     let secs = a.settings.get("secs").and_then(|v| v.as_f64()).unwrap_or(1.0);
-    let fail: Vec<i64> = a.settings.get("fail_frames").and_then(|v| v.as_array()).map(|x| x.iter().filter_map(|v| v.as_i64()).collect()).unwrap_or_default();
+    let fail: Vec<i64> =
+        a.settings.get("fail_frames").and_then(|v| v.as_array()).map(|x| x.iter().filter_map(|v| v.as_i64()).collect()).unwrap_or_default();
     let black = a.settings.get("black").and_then(|v| v.as_bool()).unwrap_or(false);
     let mut failed = 0;
     for (f, tmp, dest) in outputs {
@@ -517,8 +501,8 @@ async fn dummy(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use openfarm_core::model::{OutputSpec, SceneRef, SlotKind};
 

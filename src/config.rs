@@ -3,9 +3,9 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
-use base64::engine::general_purpose::STANDARD as BASE64;
+use anyhow::{Context, Result, bail};
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::Identity;
@@ -172,11 +172,7 @@ impl Config {
             Role::Server => format!("http://127.0.0.1:{}", self.server_port),
             _ => {
                 let s = self.server.trim().trim_start_matches("http://").trim_end_matches('/');
-                if s.contains(':') {
-                    format!("http://{s}")
-                } else {
-                    format!("http://{s}:{}", SERVER_PORT)
-                }
+                if s.contains(':') { format!("http://{s}") } else { format!("http://{s}:{}", SERVER_PORT) }
             }
         }
     }
@@ -211,10 +207,7 @@ pub fn computer_name() -> String {
 
 /// `%LOCALAPPDATA%\OpenFarm` unless `--data` says otherwise.
 pub fn default_data_dir() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("OpenFarm")
+    std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("OpenFarm")
 }
 
 pub fn now_ms() -> u64 {

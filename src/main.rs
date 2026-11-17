@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use openfarm::agent::{AgentStatus, SharedStatus};
-use openfarm::config::{default_data_dir, Config, MachineKind, Role};
+use openfarm::config::{Config, MachineKind, Role, default_data_dir};
 use openfarm::local::{self, Control, LocalState};
 
 struct Args {

@@ -37,8 +37,7 @@ pub enum SlotKind {
 }
 
 impl Engine {
-    pub const ALL: [Engine; 7] =
-        [Engine::Vray, Engine::VrayGpu, Engine::Corona, Engine::Fstorm, Engine::Cycles, Engine::Eevee, Engine::Dummy];
+    pub const ALL: [Engine; 7] = [Engine::Vray, Engine::VrayGpu, Engine::Corona, Engine::Fstorm, Engine::Cycles, Engine::Eevee, Engine::Dummy];
 
     pub fn host(self) -> Host {
         match self {
@@ -121,11 +120,7 @@ impl OutputSpec {
         let name = if self.name.contains('#') { self.name.clone() } else { format!("{}_####", self.name) };
         let start = name.find('#').unwrap_or(0);
         let count = name[start..].chars().take_while(|c| *c == '#').count();
-        let number = if frame < 0 {
-            format!("-{:0width$}", -frame, width = count)
-        } else {
-            format!("{:0width$}", frame, width = count)
-        };
+        let number = if frame < 0 { format!("-{:0width$}", -frame, width = count) } else { format!("{:0width$}", frame, width = count) };
         format!("{}{}{}.{}", &name[..start], number, &name[start + count..], self.format)
     }
 }

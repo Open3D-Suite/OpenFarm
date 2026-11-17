@@ -5,6 +5,7 @@ Sending saves a copy of the scene (the open file is untouched; relative paths ar
 farm points them at this file's folder), uploads it to the farm through the OpenFarm app running on this
 computer, and creates the job.
 """
+
 import json
 import os
 import tempfile
@@ -24,7 +25,9 @@ def call(path, body=None, data=None, headers=None):
     if body is not None:
         data = json.dumps(body).encode()
         headers = {"content-type": "application/json"}
-    req = urllib.request.Request(LOCAL + path, data=data, headers=headers or {}, method="POST" if data is not None else "GET")
+    req = urllib.request.Request(
+        LOCAL + path, data=data, headers=headers or {}, method="POST" if data is not None else "GET"
+    )
     try:
         with urllib.request.urlopen(req, timeout=600) as r:
             return json.loads(r.read() or b"null")
@@ -48,13 +51,30 @@ def _set_status(text, ok=True):
 
 
 class OpenFarmSettings(bpy.types.PropertyGroup):
-    frames: bpy.props.StringProperty(name="Frames", description="Empty: the scene's frame range. Or 1-100, 1-240:4, 1,7,22")
-    folder: bpy.props.StringProperty(name="Output folder", subtype="DIR_PATH",
-                                     description="A folder every machine of the farm can reach, e.g. \\\\server\\projects\\shot\\renders")
-    file_name: bpy.props.StringProperty(name="File name", default="frame_####", description="#### becomes the frame number")
-    file_format: bpy.props.EnumProperty(name="Format", items=[("exr", "OpenEXR", ""), ("png", "PNG", ""), ("jpg", "JPEG", "")])
-    device: bpy.props.EnumProperty(name="Cycles device", items=[("OPTIX", "OptiX", ""), ("CUDA", "CUDA", ""), ("HIP", "HIP", ""),
-                                                                ("ONEAPI", "oneAPI", ""), ("CPU", "CPU", "")])
+    frames: bpy.props.StringProperty(
+        name="Frames", description="Empty: the scene's frame range. Or 1-100, 1-240:4, 1,7,22"
+    )
+    folder: bpy.props.StringProperty(
+        name="Output folder",
+        subtype="DIR_PATH",
+        description="A folder every machine of the farm can reach, e.g. \\\\server\\projects\\shot\\renders",
+    )
+    file_name: bpy.props.StringProperty(
+        name="File name", default="frame_####", description="#### becomes the frame number"
+    )
+    file_format: bpy.props.EnumProperty(
+        name="Format", items=[("exr", "OpenEXR", ""), ("png", "PNG", ""), ("jpg", "JPEG", "")]
+    )
+    device: bpy.props.EnumProperty(
+        name="Cycles device",
+        items=[
+            ("OPTIX", "OptiX", ""),
+            ("CUDA", "CUDA", ""),
+            ("HIP", "HIP", ""),
+            ("ONEAPI", "oneAPI", ""),
+            ("CPU", "CPU", ""),
+        ],
+    )
     priority: bpy.props.IntProperty(name="Priority", default=50, min=0, max=100)
     chunk: bpy.props.IntProperty(name="Frames per task", default=0, min=0, description="0: automatic")
     paused: bpy.props.BoolProperty(name="Send paused", default=False)
@@ -89,7 +109,8 @@ class OPENFARM_OT_send(bpy.types.Operator):
         # relative_remap=False keeps '//textures/…' as it is; the farm resolves it against the original folder.
         bpy.ops.wm.save_as_mainfile(filepath=snapshot, copy=True, relative_remap=False, compress=True)
         frames = s.frames.strip() or (
-            "%d-%d" % (scene.frame_start, scene.frame_end) + (":%d" % scene.frame_step if scene.frame_step > 1 else ""))
+            "%d-%d" % (scene.frame_start, scene.frame_end) + (":%d" % scene.frame_step if scene.frame_step > 1 else "")
+        )
         spec = {
             "name": os.path.splitext(file_name)[0],
             "engine": engine,
@@ -111,8 +132,11 @@ class OPENFARM_OT_send(bpy.types.Operator):
                 size = os.path.getsize(snapshot)
                 q = urllib.parse.urlencode({"name": file_name, "original": original})
                 with open(snapshot, "rb") as f:
-                    spec["scene"] = call("/api/v1/scenes?" + q, data=f,
-                                         headers={"content-type": "application/octet-stream", "content-length": str(size)})
+                    spec["scene"] = call(
+                        "/api/v1/scenes?" + q,
+                        data=f,
+                        headers={"content-type": "application/octet-stream", "content-length": str(size)},
+                    )
                 job = call("/api/v1/jobs", spec)
                 _set_status("Sent: job %s" % job["id"])
             except Exception as e:  # noqa: BLE001

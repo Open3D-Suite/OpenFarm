@@ -265,7 +265,8 @@ pub(crate) mod tests {
         let whole = |answer: &[u8]| {
             let text = String::from_utf8_lossy(answer);
             let Some((head, body)) = text.split_once("\r\n\r\n") else { return false };
-            let length = head.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok()));
+            let length =
+                head.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok()));
             body.len() >= length.unwrap_or(0)
         };
         while !whole(&answer) {

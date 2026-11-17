@@ -2,10 +2,10 @@
 //! The web interface, built into the program. The same page is served by the farm server (for any
 //! browser of the farm) and by the local app (for this machine's window).
 
+use axum::Router;
 use axum::http::header;
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 
 const INDEX: &str = include_str!("../ui/index.html");
 const APP: &str = include_str!("../ui/app.js");

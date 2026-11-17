@@ -16,11 +16,11 @@ use std::time::Duration;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use openfarm_core::model::{Capabilities, SlotKind};
-use openfarm_core::proto::{AgentMsg, ServerMsg, PROTOCOL};
+use openfarm_core::proto::{AgentMsg, PROTOCOL, ServerMsg};
 use serde::Serialize;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_util::sync::CancellationToken;
 
 use crate::auth::{self, Identity};

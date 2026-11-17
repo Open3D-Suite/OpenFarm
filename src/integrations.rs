@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
 use crate::config::Config;
 
@@ -49,13 +49,7 @@ pub fn install_blender(cfg: &Config) -> Result<String> {
     if version.is_empty() || version == "custom" {
         bail!("cannot tell which Blender version is installed");
     }
-    let dir = appdata()?
-        .join("Blender Foundation")
-        .join("Blender")
-        .join(&version)
-        .join("extensions")
-        .join("user_default")
-        .join("openfarm");
+    let dir = appdata()?.join("Blender Foundation").join("Blender").join(&version).join("extensions").join("user_default").join("openfarm");
     write_all(&dir, BLENDER_FILES)?;
     let status = std::process::Command::new(&blender.path)
         .args([

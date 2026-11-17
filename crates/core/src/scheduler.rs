@@ -54,9 +54,7 @@ pub struct Assignment {
 pub fn plan(jobs: &[JobQueue], machines: &[MachineSlots]) -> Vec<Assignment> {
     let mut jobs: Vec<JobQueue> = jobs.iter().filter(|j| !j.pending.is_empty()).cloned().collect();
     let mut order: Vec<&MachineSlots> = machines.iter().collect();
-    order.sort_by(|a, b| {
-        a.rank.cmp(&b.rank).then(speed_key(a.speed).partial_cmp(&speed_key(b.speed)).unwrap()).then(a.id.cmp(&b.id))
-    });
+    order.sort_by(|a, b| a.rank.cmp(&b.rank).then(speed_key(a.speed).partial_cmp(&speed_key(b.speed)).unwrap()).then(a.id.cmp(&b.id)));
     let mut out = Vec::new();
     for m in order {
         let mut free = [(SlotKind::Cpu, m.free_cpu), (SlotKind::Gpu, m.free_gpu)];
@@ -100,11 +98,7 @@ pub fn plan(jobs: &[JobQueue], machines: &[MachineSlots]) -> Vec<Assignment> {
 }
 
 fn speed_key(s: f64) -> f64 {
-    if s <= 0.0 {
-        f64::MAX
-    } else {
-        s
-    }
+    if s <= 0.0 { f64::MAX } else { s }
 }
 
 /// Is `a` a better pick than `b` for a machine whose warm job is `warm`?
@@ -133,39 +127,18 @@ mod tests {
 
     fn caps(software: &[&str], gpus: u32) -> Capabilities {
         Capabilities {
-            software: software
-                .iter()
-                .map(|s| Software { name: s.to_string(), version: "1".into(), path: String::new() })
-                .collect(),
+            software: software.iter().map(|s| Software { name: s.to_string(), version: "1".into(), path: String::new() }).collect(),
             gpus: (0..gpus).map(|i| Gpu { index: i, name: "gpu".into(), vram_mb: 8000 }).collect(),
             ..Default::default()
         }
     }
 
     fn job(id: u64, engine: Engine, frames: std::ops::Range<i32>, priority: u8) -> JobQueue {
-        JobQueue {
-            id,
-            priority,
-            created: id,
-            engine,
-            device: None,
-            pending: frames.collect(),
-            running: 0,
-            chunk: 1,
-            excluded: vec![],
-        }
+        JobQueue { id, priority, created: id, engine, device: None, pending: frames.collect(), running: 0, chunk: 1, excluded: vec![] }
     }
 
     fn machine(id: &str, sw: &[&str], gpus: u32, rank: u8) -> MachineSlots {
-        MachineSlots {
-            id: id.into(),
-            caps: caps(sw, gpus),
-            free_cpu: 1,
-            free_gpu: gpus,
-            warm_job: None,
-            rank,
-            speed: 0.0,
-        }
+        MachineSlots { id: id.into(), caps: caps(sw, gpus), free_cpu: 1, free_gpu: gpus, warm_job: None, rank, speed: 0.0 }
     }
 
     #[test]

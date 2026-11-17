@@ -7,6 +7,7 @@ With the test renderer (engine "dummy", the default) it needs nothing else: it s
 frame 7 always fails, waits, and checks that the job ends as expected. With a real engine it snapshots the
 scene through the server and renders the given frames.
 """
+
 import json
 import os
 import sys
@@ -52,7 +53,10 @@ def main():
     while True:
         d = call(base, "/api/v1/jobs/%d" % job)
         s = d["summary"]
-        print("  %5.1f s  %-9s done %d  rendering %d  failed %d" % (time.time() - t0, s["state"], s["done"], s["rendering"], s["failed"]))
+        print(
+            "  %5.1f s  %-9s done %d  rendering %d  failed %d"
+            % (time.time() - t0, s["state"], s["done"], s["rendering"], s["failed"])
+        )
         if s["state"] in ("done", "failed", "canceled"):
             break
         time.sleep(1)

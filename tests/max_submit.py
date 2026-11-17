@@ -7,6 +7,7 @@
 
 Prints what the window would show, then sends the scene the way the window does.
 """
+
 import os
 import sys
 import tempfile
@@ -28,16 +29,36 @@ dirty_before = rt.getSaveRequired()
 snapshot = os.path.join(tempfile.gettempdir(), "OpenFarm", uuid.uuid4().hex, str(rt.maxFileName))
 os.makedirs(os.path.dirname(snapshot), exist_ok=True)
 ok = rt.saveMaxFile(snapshot, clearNeedSaveFlag=False, useNewFile=False, quiet=True)
-print("SNAPSHOT", ok, os.path.getsize(snapshot), "file still", rt.maxFileName, "dirty kept", rt.getSaveRequired() == dirty_before)
+print(
+    "SNAPSHOT",
+    ok,
+    os.path.getsize(snapshot),
+    "file still",
+    rt.maxFileName,
+    "dirty kept",
+    rt.getSaveRequired() == dirty_before,
+)
 with open(snapshot, "rb") as f:
     import urllib.parse
+
     q = urllib.parse.urlencode({"name": str(rt.maxFileName), "original": scene})
-    ref = ofm.call("/api/v1/scenes?" + q, data=f, headers={"content-type": "application/octet-stream",
-                                                            "content-length": str(os.path.getsize(snapshot))})
+    ref = ofm.call(
+        "/api/v1/scenes?" + q,
+        data=f,
+        headers={"content-type": "application/octet-stream", "content-length": str(os.path.getsize(snapshot))},
+    )
 print("SCENE", ref)
-job = ofm.call("/api/v1/jobs", {
-    "name": "max submitter test", "engine": ofm.engine_of_scene(), "scene": ref, "frames": "0-3",
-    "camera": ofm.scene_cameras()[0], "output": {"folder": out, "name": "maxsub_####", "format": "exr"},
-    "settings": {}, "submitted_by": "max_submit test",
-})
+job = ofm.call(
+    "/api/v1/jobs",
+    {
+        "name": "max submitter test",
+        "engine": ofm.engine_of_scene(),
+        "scene": ref,
+        "frames": "0-3",
+        "camera": ofm.scene_cameras()[0],
+        "output": {"folder": out, "name": "maxsub_####", "format": "exr"},
+        "settings": {},
+        "submitted_by": "max_submit test",
+    },
+)
 print("JOB", job)

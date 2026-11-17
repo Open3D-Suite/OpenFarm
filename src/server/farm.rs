@@ -5,18 +5,16 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use base64::Engine as _;
-use openfarm_core::model::{
-    Capabilities, Engine, FrameInfo, FrameState, JobSpec, JobState, SlotKind, Task, TaskState, Telemetry,
-};
+use openfarm_core::model::{Capabilities, Engine, FrameInfo, FrameState, JobSpec, JobState, SlotKind, Task, TaskState, Telemetry};
 use openfarm_core::proto::{Assignment, ServerMsg, TaskEvent};
 use openfarm_core::{auto_chunk, frames, order, scheduler};
 use serde::Serialize;
 use tokio::sync::{mpsc, watch};
 
 use super::db::{Db, StoredJob, StoredMachine};
-use crate::config::{now_ms, VERSION};
+use crate::config::{VERSION, now_ms};
 
 /// What a machine is told when it comes with the id of a machine the farm knows and another key.
 pub const ANOTHER_KEY: &str = "The farm already knows this machine with another key and does not take this one in its place. \
@@ -50,11 +48,7 @@ impl JobEntry {
 
     pub fn avg_secs(&self) -> Option<f64> {
         let done: Vec<f64> = self.frames.iter().filter(|f| f.state == FrameState::Done).filter_map(|f| f.secs).collect();
-        if done.is_empty() {
-            None
-        } else {
-            Some(done.iter().sum::<f64>() / done.len() as f64)
-        }
+        if done.is_empty() { None } else { Some(done.iter().sum::<f64>() / done.len() as f64) }
     }
 
     fn count(&self, s: FrameState) -> usize {
@@ -614,10 +608,7 @@ impl Farm {
         let engine = job.spec.engine;
         let device = job.spec.device.clone();
         let nobody_left = !job.excluded.is_empty()
-            && !self
-                .machines
-                .values()
-                .any(|m| m.approved && m.caps.can_render(engine, device.as_deref()) && !job.excluded.contains(&m.id));
+            && !self.machines.values().any(|m| m.approved && m.caps.can_render(engine, device.as_deref()) && !job.excluded.contains(&m.id));
         let fatal = fatal || (nobody_left && !ok && !canceled);
         let error = if nobody_left && !fatal_reason_given(&error) {
             error.map(|e| format!("every machine that can render this job failed it: {e}"))
