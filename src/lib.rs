@@ -6,6 +6,7 @@ pub mod agent;
 pub mod auth;
 pub mod config;
 pub mod discovery;
+pub mod dpapi;
 pub mod imaging;
 pub mod integrations;
 pub mod local;
