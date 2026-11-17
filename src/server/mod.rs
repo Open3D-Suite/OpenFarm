@@ -48,6 +48,8 @@ pub struct ServerState {
     /// Nonces of the agents' connections. Apart, and small: these come from machines that are not
     /// approved yet too, and must not be able to fill the memory or push the others out.
     agent_replay: Arc<Mutex<ReplayGuard>>,
+    /// The folders other machines may send scenes from by path (`scene_folders` in the settings).
+    scene_folders: Arc<Vec<PathBuf>>,
 }
 
 pub type ApiError = (StatusCode, String);
@@ -74,6 +76,14 @@ impl ServerState {
         let (tx, rx) = watch::channel(1u64);
         let dir = data.join("server");
         let farm = Farm::open(cfg.farm_name.clone(), dir.clone(), tx)?;
+        let mut scene_folders = Vec::new();
+        for folder in cfg.scene_folders.iter().map(|f| PathBuf::from(f.trim())) {
+            if folder.is_absolute() {
+                scene_folders.push(folder);
+            } else {
+                tracing::warn!("scene_folders: {} is not a full path and is ignored", folder.display());
+            }
+        }
         Ok(ServerState {
             farm: Arc::new(Mutex::new(farm)),
             version: rx,
@@ -81,6 +91,7 @@ impl ServerState {
             conns: Default::default(),
             replay: Arc::new(Mutex::new(ReplayGuard::new(500_000))),
             agent_replay: Arc::new(Mutex::new(ReplayGuard::new(20_000))),
+            scene_folders: Arc::new(scene_folders),
         })
     }
 }
@@ -305,11 +316,34 @@ struct FromPath {
 }
 
 /// Snapshot of a scene the server can read itself (a path on a share, from the UI's "Submit a file").
-async fn api_scene_from_path(State(s): State<ServerState>, Json(p): Json<FromPath>) -> Result<Json<SceneRef>, ApiError> {
+///
+/// The server reads the file with its own rights, so who may ask matters: from this computer any
+/// path is taken, as always; from another machine of the farm only a file inside one of the
+/// folders listed in the farm's settings (`scene_folders`), and none while that list is empty.
+async fn api_scene_from_path(
+    State(s): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(p): Json<FromPath>,
+) -> Result<Json<SceneRef>, ApiError> {
     let src = PathBuf::from(p.path.trim().trim_matches('"'));
     let name = src.file_name().and_then(|n| n.to_str()).and_then(safe_file_name).ok_or_else(|| bad("bad file name"))?;
     let data = s.data.clone();
     let original = src.to_string_lossy().into_owned();
+    let src = if addr.ip().is_loopback() {
+        src
+    } else {
+        let folders = s.scene_folders.clone();
+        // One answer for "not there" and "not allowed": the farm does not say which files exist.
+        let refusal = if folders.is_empty() {
+            "This farm does not take scenes by their path from other computers. Send the scene from 3ds Max or Blender, or use Submit on the farm's computer."
+        } else {
+            "The farm cannot take that scene: it is not a file in one of the folders this farm accepts scenes from. Send it from 3ds Max or Blender, or have its folder added to the farm's settings (scene_folders)."
+        };
+        tokio::task::spawn_blocking(move || scene_in_folders(&src, &folders))
+            .await
+            .map_err(bad)?
+            .ok_or((StatusCode::FORBIDDEN, refusal.to_string()))?
+    };
     let (hash, size, tmp) = tokio::task::spawn_blocking(move || -> Result<(String, u64, PathBuf)> {
         let tmp_dir = data.join("scenes").join(".incoming");
         std::fs::create_dir_all(&tmp_dir)?;
@@ -325,6 +359,33 @@ async fn api_scene_from_path(State(s): State<ServerState>, Json(p): Json<FromPat
     .map_err(|e| bad(format!("cannot read the scene: {e}")))?;
     store_scene(&s.data, &tmp, &hash, &name).await.map_err(bad)?;
     Ok(Json(SceneRef { hash, file_name: name, original_path: original, size }))
+}
+
+/// Where a scene asked for by its path really is, if it is a regular file inside one of `folders`.
+///
+/// Both the file and the folders are resolved by Windows first: `..` is worked out, links and
+/// junctions are followed, a mapped drive becomes its share and every path comes back in one
+/// spelling (`\\?\C:\…`, `\\?\UNC\server\share\…`). What is compared is where the file really is,
+/// so a link inside an allowed folder that points out of it does not count.
+fn scene_in_folders(requested: &Path, folders: &[PathBuf]) -> Option<PathBuf> {
+    // `scenes\a.max` or `\a.max` would depend on the folder and drive the server happens to run in.
+    if !requested.is_absolute() {
+        return None;
+    }
+    let real = std::fs::canonicalize(requested).ok()?;
+    if !std::fs::metadata(&real).ok()?.is_file() {
+        return None;
+    }
+    folders.iter().filter_map(|folder| std::fs::canonicalize(folder).ok()).any(|folder| is_inside(&real, &folder)).then_some(real)
+}
+
+/// Is the resolved path `file` below the resolved path `folder`? Compared part by part (drive or
+/// server and share, then each folder), so `C:\scenes-evil` is not inside `C:\scenes`, and without
+/// regard to case, as Windows names are.
+fn is_inside(file: &Path, folder: &Path) -> bool {
+    let parts = |path: &Path| path.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect::<Vec<_>>();
+    let (file, folder) = (parts(file), parts(folder));
+    file.len() > folder.len() && file[..folder.len()] == folder[..]
 }
 
 async fn store_scene(data: &Path, tmp: &Path, hash: &str, name: &str) -> Result<()> {
@@ -727,6 +788,158 @@ mod tests {
         assert!(!farm.trusts_fingerprint(&p.fingerprint()));
         assert!(farm.machine_action("p", "approve").is_err());
         assert!(!farm.machines["p"].approved);
+    }
+
+    /// Folders and files to ask for: `scenes` is the allowed folder, the rest is not.
+    fn scene_tree(root: &Path) {
+        for folder in ["scenes/sub", "scenes/folder.max", "scenes-evil", "outside"] {
+            std::fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        for file in ["scenes/shot.max", "scenes/sub/deep.blend", "scenes-evil/steal.max", "outside/steal.max", "secret.txt"] {
+            std::fs::write(root.join(file), file).unwrap();
+        }
+    }
+
+    #[test]
+    fn scenes_by_path_come_only_from_the_allowed_folders() {
+        let dir = TestDir::new();
+        let root = dir.path();
+        scene_tree(root);
+        let allowed = [root.join("scenes")];
+        let real = |path: &str| std::fs::canonicalize(root.join(path)).unwrap();
+        let ask = |path: PathBuf| scene_in_folders(&path, &allowed);
+
+        // Inside, however it is spelled: other case, `..` that stays inside, the `\\?\` form.
+        assert_eq!(ask(root.join(r"scenes\shot.max")), Some(real("scenes/shot.max")));
+        assert_eq!(ask(root.join("scenes/sub/deep.blend")), Some(real("scenes/sub/deep.blend")));
+        assert_eq!(ask(PathBuf::from(root.join(r"scenes\shot.max").to_string_lossy().to_uppercase())), Some(real("scenes/shot.max")));
+        assert_eq!(ask(root.join(r"scenes\sub\..\shot.max")), Some(real("scenes/shot.max")));
+        assert!(real("scenes/shot.max").to_string_lossy().starts_with(r"\\?\"));
+        assert_eq!(ask(real("scenes/shot.max")), Some(real("scenes/shot.max")));
+
+        // Out through `..`.
+        assert_eq!(ask(root.join(r"scenes\..\secret.txt")), None);
+        assert_eq!(ask(root.join(r"scenes\sub\..\..\secret.txt")), None);
+        assert_eq!(ask(root.join(r"scenes\..\scenes-evil\steal.max")), None);
+        // A folder whose name only starts like the allowed one.
+        assert_eq!(ask(root.join(r"scenes-evil\steal.max")), None);
+        // Plainly somewhere else, in any spelling.
+        assert_eq!(ask(root.join("secret.txt")), None);
+        assert_eq!(ask(real("secret.txt")), None);
+        assert_eq!(ask(PathBuf::from(r"C:\Windows\win.ini")), None);
+        assert_eq!(ask(PathBuf::from(r"\\?\C:\Windows\win.ini")), None);
+        // Not a file, or not there.
+        assert_eq!(ask(root.join(r"scenes\folder.max")), None);
+        assert_eq!(ask(root.join("scenes")), None);
+        assert_eq!(ask(root.join(r"scenes\missing.max")), None);
+        // Not a full path: it would depend on where the server runs.
+        assert_eq!(ask(PathBuf::from(r"scenes\shot.max")), None);
+        assert_eq!(ask(PathBuf::from("shot.max")), None);
+        assert_eq!(ask(PathBuf::from(r"\scenes\shot.max")), None);
+        assert_eq!(ask(PathBuf::from(r"C:scenes\shot.max")), None);
+        // Devices.
+        assert_eq!(ask(PathBuf::from(r"\\.\NUL")), None);
+        assert_eq!(ask(root.join(r"scenes\NUL")), None);
+        assert_eq!(ask(root.join(r"scenes\CON")), None);
+
+        // No folder allowed, or one that does not exist: nothing. Several: any of them.
+        assert_eq!(scene_in_folders(&root.join(r"scenes\shot.max"), &[]), None);
+        assert_eq!(scene_in_folders(&root.join(r"scenes\shot.max"), &[root.join("nowhere")]), None);
+        let two = [root.join("nowhere"), root.join("outside"), root.join("scenes")];
+        assert_eq!(scene_in_folders(&root.join(r"outside\steal.max"), &two), Some(real("outside/steal.max")));
+        assert_eq!(scene_in_folders(&root.join(r"scenes\shot.max"), &two), Some(real("scenes/shot.max")));
+    }
+
+    #[test]
+    fn links_count_for_where_they_lead() {
+        let dir = TestDir::new();
+        let root = dir.path();
+        scene_tree(root);
+        let allowed = [root.join("scenes")];
+        let real = |path: &str| std::fs::canonicalize(root.join(path)).unwrap();
+        // A junction needs no special rights, so this part always runs on a normal disk.
+        let junction = |link: &str, target: &str| {
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(root.join(link))
+                .arg(root.join(target))
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        };
+        if junction(r"scenes\jump", "outside") && junction(r"scenes\alias", r"scenes\sub") {
+            // Out of the allowed folder through a link inside it: refused.
+            assert_eq!(scene_in_folders(&root.join(r"scenes\jump\steal.max"), &allowed), None);
+            // A link that stays inside is as good as the folder it points to.
+            assert_eq!(scene_in_folders(&root.join(r"scenes\alias\deep.blend"), &allowed), Some(real("scenes/sub/deep.blend")));
+            // And a link from outside to an allowed folder leads to an allowed file.
+            assert!(junction("door", "scenes"));
+            assert_eq!(scene_in_folders(&root.join(r"door\shot.max"), &allowed), Some(real("scenes/shot.max")));
+        } else {
+            eprintln!("junctions cannot be made in {}: not checked", root.display());
+        }
+        // A link to a file needs a right most users do not have: checked where it can be made.
+        if std::os::windows::fs::symlink_file(root.join("secret.txt"), root.join(r"scenes\link.max")).is_ok() {
+            assert_eq!(scene_in_folders(&root.join(r"scenes\link.max"), &allowed), None);
+        }
+    }
+
+    #[test]
+    fn inside_means_part_by_part() {
+        let inside = |file: &str, folder: &str| is_inside(Path::new(file), Path::new(folder));
+        assert!(inside(r"\\?\C:\scenes\a.max", r"\\?\C:\scenes"));
+        assert!(inside(r"\\?\C:\Scenes\Shot\a.max", r"\\?\c:\scenes"));
+        assert!(inside(r"\\?\C:\scenes\a.max", r"\\?\C:\"));
+        assert!(!inside(r"\\?\C:\scenes-evil\a.max", r"\\?\C:\scenes"));
+        assert!(!inside(r"\\?\C:\scenesa.max", r"\\?\C:\scenes"));
+        assert!(!inside(r"\\?\C:\scenes", r"\\?\C:\scenes"));
+        assert!(!inside(r"\\?\C:\a.max", r"\\?\C:\scenes"));
+        // Another drive, a share against a drive.
+        assert!(!inside(r"\\?\D:\scenes\a.max", r"\\?\C:\scenes"));
+        assert!(!inside(r"\\?\UNC\nas\projects\a.max", r"\\?\C:\"));
+        // Shares: the server and the share are compared whole, in any case.
+        assert!(inside(r"\\?\UNC\nas\projects\shot\a.max", r"\\?\UNC\nas\projects"));
+        assert!(inside(r"\\?\UNC\NAS\Projects\shot\a.max", r"\\?\UNC\nas\projects\Shot"));
+        assert!(!inside(r"\\?\UNC\nas\projects-old\a.max", r"\\?\UNC\nas\projects"));
+        assert!(!inside(r"\\?\UNC\nas2\projects\a.max", r"\\?\UNC\nas\projects"));
+        assert!(!inside(r"\\?\UNC\nas\private\a.max", r"\\?\UNC\nas\projects"));
+        assert!(!inside(r"\\?\UNC\nas\projects\a.max", r"\\?\UNC\nas\projects\shot"));
+    }
+
+    #[tokio::test]
+    async fn other_machines_send_scenes_by_path_only_from_the_allowed_folders() {
+        let dir = TestDir::new();
+        let root = dir.path();
+        scene_tree(root);
+        let ask = |state: &ServerState, from: &str, path: PathBuf| {
+            let addr: SocketAddr = from.parse().unwrap();
+            api_scene_from_path(State(state.clone()), ConnectInfo(addr), Json(FromPath { path: path.to_string_lossy().into_owned() }))
+        };
+        let network = "192.168.2.20:50000";
+
+        // No folder in the settings: the network gets nothing, this computer everything, as before.
+        let state = ServerState::new(&Config::new(), &root.join("farm")).unwrap();
+        let refused = ask(&state, network, root.join(r"scenes\shot.max")).await.err().unwrap();
+        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+        assert!(refused.1.contains("does not take scenes by their path"), "{}", refused.1);
+        let local = ask(&state, "127.0.0.1:50000", root.join("secret.txt")).await.unwrap().0;
+        assert_eq!(local.hash, blake3::hash(b"secret.txt").to_hex().to_string());
+        drop(state);
+
+        // With a folder: what is in it, and nothing else.
+        let cfg = Config { scene_folders: vec![root.join("scenes").to_string_lossy().into_owned(), "relative".into()], ..Config::new() };
+        let state = ServerState::new(&cfg, &root.join("farm")).unwrap();
+        let scene = ask(&state, network, root.join(r"scenes\sub\deep.blend")).await.unwrap().0;
+        assert_eq!((scene.file_name.as_str(), scene.size), ("deep.blend", 21));
+        assert_eq!(scene.hash, blake3::hash(b"scenes/sub/deep.blend").to_hex().to_string());
+        assert!(root.join("farm/server/scenes").join(&scene.hash).join("deep.blend").is_file());
+        for path in [r"secret.txt", r"scenes\..\secret.txt", r"scenes-evil\steal.max", r"scenes\missing.max"] {
+            let refused = ask(&state, network, root.join(path)).await.err().unwrap();
+            assert_eq!(refused.0, StatusCode::FORBIDDEN, "{path}");
+            // The same words whether the file exists or not.
+            assert!(refused.1.contains("not a file in one of the folders"), "{}", refused.1);
+        }
+        assert!(ask(&state, "127.0.0.1:50000", root.join(r"scenes-evil\steal.max")).await.is_ok());
     }
 
     #[test]

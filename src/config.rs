@@ -59,6 +59,11 @@ pub struct Config {
     /// The farm's name, on a server.
     #[serde(default)]
     pub farm_name: String,
+    /// On a server: the folders (full paths) from which the other machines of the farm may send
+    /// a scene by its path, with the Submit page. Empty: none, only this computer can. Scenes sent
+    /// from 3ds Max and Blender are uploads and do not need it.
+    #[serde(default)]
+    pub scene_folders: Vec<String>,
     /// Override the program paths found automatically.
     #[serde(default)]
     pub blender_path: Option<String>,
@@ -98,6 +103,7 @@ impl Config {
             machine_id: uuid::Uuid::new_v4().to_string(),
             private_key: String::new(),
             farm_name: format!("{} farm", computer_name()),
+            scene_folders: Vec::new(),
             blender_path: None,
             max_batch_path: None,
             server_port: SERVER_PORT,
