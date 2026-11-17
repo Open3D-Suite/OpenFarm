@@ -227,7 +227,11 @@ struct Since {
 async fn api_state(State(s): State<ServerState>, Query(q): Query<Since>) -> Response {
     let mut rx = s.version.clone();
     if let Some(since) = q.since {
-        if *rx.borrow() == since {
+        // `borrow_and_update` marks what is there now as seen, so `changed` waits for the next
+        // change. With a plain `borrow` it returned at once (this copy of the receiver had never
+        // seen anything) and every open window asked again without a pause, a thousand times a
+        // second.
+        if *rx.borrow_and_update() == since {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(25), rx.changed()).await;
         }
     }
@@ -932,6 +936,33 @@ mod tests {
         assert!(connect(&mut farm, "old", &second, 2).is_err());
         farm.machine_action("old", "approve").unwrap();
         assert!(farm.trusts_fingerprint(&first.fingerprint()) && !farm.trusts_fingerprint(&second.fingerprint()));
+    }
+
+    #[tokio::test]
+    async fn the_long_poll_waits_until_something_changes() {
+        use std::time::Duration;
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let version = |response: Response| async move {
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["v"].as_u64().unwrap()
+        };
+        let ask = |since: Option<u64>| api_state(State(state.clone()), Query(Since { since }));
+        // The farm has changed many times since it started (machines connected, one was approved).
+        let now = version(ask(None).await).await;
+        assert!(now > 1);
+        // A window that has an older picture gets the new one at once.
+        let fresh = tokio::time::timeout(Duration::from_millis(500), ask(Some(now - 1))).await.expect("an answer at once");
+        assert_eq!(version(fresh).await, now);
+        // A window that is up to date is not answered while nothing changes…
+        assert!(tokio::time::timeout(Duration::from_millis(400), ask(Some(now))).await.is_err(), "the long poll did not wait");
+        // …and is answered as soon as something does.
+        let waiting = tokio::spawn(ask(Some(now)));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!waiting.is_finished());
+        connect(&mut state.farm.lock().unwrap(), "a", &a, 5).unwrap();
+        let answered = tokio::time::timeout(Duration::from_secs(5), waiting).await.expect("an answer after the change").unwrap();
+        assert!(version(answered).await > now);
     }
 
     /// The farm served on a loopback port of its own. Send on the returned channel to stop it.

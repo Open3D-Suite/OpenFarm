@@ -39,6 +39,10 @@ machines again on the farm's computer (*Machines*).
   it downloaded, or kept from an earlier job, is exactly the scene its job names. A scene that was
   changed or damaged on the way is deleted and the task fails saying so, instead of rendering it.
 
+- **An open window no longer asks the farm without a pause.** The window is meant to wait until
+  something changes on the farm. Since the first version it asked again at once, about a thousand times
+  a second for as long as it was open. It waits now.
+
 The traffic between machines is still not encrypted: see *Security* in the README.
 
 ## 0.1.1 — 16 November 2026
