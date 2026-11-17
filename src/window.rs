@@ -27,6 +27,8 @@ fn icon() -> Option<Icon> {
     Icon::from_rgba(picture.into_raw(), w, h).ok()
 }
 
+// Calls Windows for its message box: that takes `unsafe`.
+#[allow(unsafe_code)]
 fn ask_keep_running(hwnd: isize) -> Option<bool> {
     #[link(name = "user32")]
     unsafe extern "system" {

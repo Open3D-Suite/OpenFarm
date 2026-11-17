@@ -3,6 +3,20 @@
 members = ["crates/core"]
 resolver = "2"
 
+# The lints common to every OPEN3D Rust project. `unsafe` is denied here and not forbidden because
+# three places call Windows and need it; each says so where it is allowed: the `dpapi` and
+# `agent::jobobj` modules and one function of `window`. The crates without `unsafe` forbid it in
+# their first lines.
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "warn"
+todo = "warn"
+
 [package]
 name = "openfarm"
 version = "0.1.1"
@@ -12,6 +26,9 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/carlesllavata/OpenFarm"
 publish = false
 build = "build.rs"
+
+[lints]
+workspace = true
 
 [lib]
 name = "openfarm"

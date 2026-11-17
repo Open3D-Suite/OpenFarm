@@ -9,6 +9,7 @@
 //!   --farm-name <name>  --no-render  --server-port <n>  --local-port <n>  --no-discovery
 //!                                    set and save the role without the first-run page
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![forbid(unsafe_code)]
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

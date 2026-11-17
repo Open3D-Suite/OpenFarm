@@ -6,6 +6,8 @@ pub mod agent;
 pub mod auth;
 pub mod config;
 pub mod discovery;
+// Calls Windows (the Data Protection API) to encrypt this machine's key: that takes `unsafe`.
+#[allow(unsafe_code)]
 pub mod dpapi;
 pub mod imaging;
 pub mod integrations;

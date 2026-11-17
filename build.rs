@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Gives the Windows executable its icon and file properties (the version comes from Cargo.toml).
+#![forbid(unsafe_code)]
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");

@@ -4,6 +4,8 @@
 //! each NVIDIA GPU).
 
 pub mod hosts;
+// Calls Windows (job objects) to end a render host with every process it started: that takes `unsafe`.
+#[allow(unsafe_code)]
 pub mod jobobj;
 pub mod probe;
 pub mod runner;

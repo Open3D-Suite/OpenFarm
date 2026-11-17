@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! OpenFarm's core: the farm's data, frame lists and render order, the agent protocol and the
 //! scheduler. Nothing here does IO, so all of it is tested with plain `cargo test`.
+#![forbid(unsafe_code)]
 
 pub mod frames;
 pub mod model;
