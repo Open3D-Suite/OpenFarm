@@ -341,12 +341,11 @@ impl Farm {
     fn cancel_tasks_of(&mut self, job: u64) {
         let ids: Vec<u64> = self.tasks.values().filter(|t| t.task.job == job).map(|t| t.task.id).collect();
         for id in ids {
-            if let Some(t) = self.tasks.get(&id) {
-                if let Some(m) = self.machines.get(&t.task.machine) {
-                    if let Some(tx) = &m.tx {
-                        let _ = tx.send(ServerMsg::Cancel { task: id });
-                    }
-                }
+            if let Some(t) = self.tasks.get(&id)
+                && let Some(m) = self.machines.get(&t.task.machine)
+                && let Some(tx) = &m.tx
+            {
+                let _ = tx.send(ServerMsg::Cancel { task: id });
             }
         }
     }
@@ -515,23 +514,23 @@ impl Farm {
                 live.frame = None;
                 live.pct = 0.0;
                 let mut has_thumb = false;
-                if let Some(b64) = thumb {
-                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
-                        let dir = self.data.join("thumbs").join(job_id.to_string());
-                        let _ = std::fs::create_dir_all(&dir);
-                        has_thumb = std::fs::write(dir.join(format!("{frame}.jpg")), bytes).is_ok();
-                    }
+                if let Some(b64) = thumb
+                    && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64)
+                {
+                    let dir = self.data.join("thumbs").join(job_id.to_string());
+                    let _ = std::fs::create_dir_all(&dir);
+                    has_thumb = std::fs::write(dir.join(format!("{frame}.jpg")), bytes).is_ok();
                 }
-                if let Some(job) = self.jobs.get_mut(&job_id) {
-                    if let Some(f) = job.frame_mut(frame) {
-                        f.state = FrameState::Done;
-                        f.secs = Some(secs);
-                        f.thumb = has_thumb;
-                        f.warning = warning;
-                        f.machine = Some(machine.to_string());
-                        let f = f.clone();
-                        let _ = self.db.save_frames(job_id, &[f]);
-                    }
+                if let Some(job) = self.jobs.get_mut(&job_id)
+                    && let Some(f) = job.frame_mut(frame)
+                {
+                    f.state = FrameState::Done;
+                    f.secs = Some(secs);
+                    f.thumb = has_thumb;
+                    f.warning = warning;
+                    f.machine = Some(machine.to_string());
+                    let f = f.clone();
+                    let _ = self.db.save_frames(job_id, &[f]);
                 }
             }
             TaskEvent::FrameFailed { frame, error } => {

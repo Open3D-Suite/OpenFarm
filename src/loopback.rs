@@ -91,10 +91,10 @@ pub fn check(headers: &HeaderMap, uri: &Uri, port: u16) -> Result<(), Refused> {
         (None, _) if uri.authority().is_none() => return Err(Refused::Host(String::new())),
         (None, _) => {}
     }
-    if let Some(authority) = uri.authority() {
-        if !is_own(authority.as_str(), port) {
-            return Err(Refused::Host(authority.to_string()));
-        }
+    if let Some(authority) = uri.authority()
+        && !is_own(authority.as_str(), port)
+    {
+        return Err(Refused::Host(authority.to_string()));
     }
     for origin in headers.get_all(ORIGIN) {
         let origin = text(origin);

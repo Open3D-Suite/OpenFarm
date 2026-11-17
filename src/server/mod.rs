@@ -147,10 +147,10 @@ pub fn router(state: ServerState) -> Router {
 /// computer could send are turned away first, whatever they ask for (see `crate::loopback`).
 /// Requests from the network go on to be checked for their signature.
 async fn keep_pages_out(State(s): State<ServerState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, req: Request, next: Next) -> Response {
-    if addr.ip().is_loopback() {
-        if let Err(refused) = crate::loopback::check(req.headers(), req.uri(), s.port) {
-            return crate::loopback::refuse(refused);
-        }
+    if addr.ip().is_loopback()
+        && let Err(refused) = crate::loopback::check(req.headers(), req.uri(), s.port)
+    {
+        return crate::loopback::refuse(refused);
     }
     next.run(req).await
 }
@@ -572,10 +572,10 @@ async fn discovery(name: String, port: u16) {
     let reply = json!({ "openfarm": VERSION, "name": name, "port": port }).to_string();
     let mut buf = [0u8; 64];
     loop {
-        if let Ok((n, from)) = sock.recv_from(&mut buf).await {
-            if &buf[..n] == crate::discovery::QUESTION {
-                let _ = sock.send_to(reply.as_bytes(), from).await;
-            }
+        if let Ok((n, from)) = sock.recv_from(&mut buf).await
+            && &buf[..n] == crate::discovery::QUESTION
+        {
+            let _ = sock.send_to(reply.as_bytes(), from).await;
         }
     }
 }
