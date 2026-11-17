@@ -30,6 +30,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
+use axum::http::header::UPGRADE;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -301,7 +302,15 @@ impl std::error::Error for AuthError {}
 
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
-        (self.status(), self.to_string()).into_response()
+        let mut response = (self.status(), self.to_string()).into_response();
+        if self == AuthError::Legacy {
+            // "426 Upgrade Required" names what to upgrade to.
+            let protocol = format!("openfarm/{}", openfarm_core::proto::PROTOCOL);
+            if let Ok(value) = protocol.parse() {
+                response.headers_mut().insert(UPGRADE, value);
+            }
+        }
+        response
     }
 }
 

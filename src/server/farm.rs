@@ -80,10 +80,10 @@ pub struct LiveTask {
 pub struct MachineEntry {
     pub id: String,
     pub name: String,
-    /// The key the server trusts (set on approval).
-    pub key: Option<String>,
-    /// The key the machine offered on its last connection.
-    pub offered_key: String,
+    /// Fingerprint of the public key the server trusts (set on approval).
+    pub fingerprint: Option<String>,
+    /// Fingerprint of the key the machine proved to hold on its last connection.
+    pub offered_fingerprint: String,
     pub approved: bool,
     pub enabled: bool,
     pub accepting: bool,
@@ -107,7 +107,7 @@ impl MachineEntry {
         StoredMachine {
             id: self.id.clone(),
             name: self.name.clone(),
-            key: self.key.clone(),
+            fingerprint: self.fingerprint.clone(),
             approved: self.approved,
             enabled: self.enabled,
             caps: self.caps.clone(),
@@ -132,7 +132,8 @@ pub struct Farm {
 pub struct Hello {
     pub machine_id: String,
     pub name: String,
-    pub key: String,
+    /// Fingerprint of the key that signed the request that opened the connection.
+    pub fingerprint: String,
     pub version: String,
     pub caps: Capabilities,
     pub rank: u8,
@@ -190,8 +191,8 @@ impl Farm {
                 MachineEntry {
                     id: m.id,
                     name: m.name,
-                    key: m.key,
-                    offered_key: String::new(),
+                    fingerprint: m.fingerprint,
+                    offered_fingerprint: String::new(),
                     approved: m.approved,
                     enabled: m.enabled,
                     accepting: true,
@@ -214,9 +215,10 @@ impl Farm {
         self.version.send_modify(|v| *v += 1);
     }
 
-    /// Is this key one the farm trusts (an approved machine's)?
-    pub fn trusts_key(&self, key: &str) -> bool {
-        !key.is_empty() && self.machines.values().any(|m| m.approved && m.key.as_deref() == Some(key))
+    /// Is this the fingerprint of a key the farm trusts (an approved machine's)? Fingerprints are
+    /// not secret, so a plain comparison gives nothing away.
+    pub fn trusts_fingerprint(&self, fingerprint: &str) -> bool {
+        !fingerprint.is_empty() && self.machines.values().any(|m| m.approved && m.fingerprint.as_deref() == Some(fingerprint))
     }
 
     // ---- jobs -------------------------------------------------------------------------------
@@ -357,8 +359,11 @@ impl Farm {
         let m = self.machines.get_mut(id).ok_or_else(|| anyhow!("no machine {id}"))?;
         match action {
             "approve" => {
+                if m.offered_fingerprint.is_empty() {
+                    bail!("the machine is not connected; it can be approved when it is");
+                }
                 m.approved = true;
-                m.key = Some(m.offered_key.clone());
+                m.fingerprint = Some(m.offered_fingerprint.clone());
                 if let Some(tx) = &m.tx {
                     let _ = tx.send(ServerMsg::Welcome {
                         approved: true,
@@ -398,8 +403,8 @@ impl Farm {
         let m = self.machines.entry(h.machine_id.clone()).or_insert_with(|| MachineEntry {
             id: h.machine_id.clone(),
             name: h.name.clone(),
-            key: None,
-            offered_key: String::new(),
+            fingerprint: None,
+            offered_fingerprint: String::new(),
             approved: false,
             enabled: true,
             accepting: true,
@@ -418,18 +423,18 @@ impl Farm {
         m.version = h.version;
         m.rank = h.rank;
         m.address = h.address;
-        m.offered_key = h.key.clone();
+        m.offered_fingerprint = h.fingerprint.clone();
         m.last_seen = now_ms();
         m.conn = conn;
         m.tx = Some(tx);
         m.warm_job = None;
-        if m.key.as_deref() != Some(h.key.as_str()) {
+        if m.fingerprint.as_deref() != Some(h.fingerprint.as_str()) {
             m.approved = false;
         }
         // The server's own agent needs no approval.
         if h.loopback && !m.approved {
             m.approved = true;
-            m.key = Some(h.key);
+            m.fingerprint = Some(h.fingerprint);
         }
         let approved = m.approved;
         let stored = m.stored();

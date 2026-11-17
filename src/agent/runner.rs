@@ -142,15 +142,17 @@ async fn ensure_scene(ctx: &Arc<AgentCtx>, a: &Assignment, rep: &mut Reporter, c
     rep.log(format!("Downloading the scene {} ({:.1} MB)", a.scene.file_name, a.scene.size as f64 / 1e6));
     tokio::fs::create_dir_all(&dir).await?;
     let started = Instant::now();
+    let url = reqwest::Url::parse(&format!("{}{}", ctx.server_url, a.scene_url)).context("the scene's address")?;
     let resp = ctx
-        .http
-        .get(format!("{}{}", ctx.server_url, a.scene_url))
-        .header("x-openfarm-key", &ctx.key)
+        .identity
+        .request(&ctx.http, reqwest::Method::GET, url, &crate::auth::sha256_hex(b""))?
         .send()
         .await
         .context("downloading the scene")?;
     if !resp.status().is_success() {
-        bail!("the server did not give the scene ({})", resp.status());
+        let status = resp.status();
+        let why = resp.text().await.unwrap_or_default();
+        bail!("the server did not give the scene ({status}) {}", why.trim());
     }
     let part = dir.join(format!("{}.part", a.scene.file_name));
     let mut file = tokio::fs::File::create(&part).await?;

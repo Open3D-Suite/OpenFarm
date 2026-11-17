@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The farm server: HTTP API, the agents' WebSocket, the scene store and the LAN discovery answer.
 //!
-//! Access: requests from this computer are trusted; from the network they need the key of an
-//! approved machine (`X-OpenFarm-Key`), which every agent adds when it relays its user's requests.
+//! Access: requests from this computer are trusted; from the network they must be signed by an
+//! approved machine (see `crate::auth`), which every machine's local app does when it relays its
+//! user's requests. An agent signs the request that opens its WebSocket in the same way.
 
 pub mod db;
 pub mod farm;
@@ -15,7 +16,7 @@ use anyhow::Result;
 use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path as UrlPath, Query, Request, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -28,8 +29,13 @@ use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, watch};
 
-use crate::config::{Config, VERSION};
+use crate::auth::{self, AuthError, ReplayGuard, Signed};
+use crate::config::{now_ms, Config, VERSION};
 use farm::{Farm, Hello};
+
+/// The one request whose body is not covered by its signature: a scene upload is passed on while
+/// it is read and can be many gigabytes (see `crate::local`).
+const UPLOAD_PATH: &str = "/api/v1/scenes";
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -37,6 +43,11 @@ pub struct ServerState {
     pub version: watch::Receiver<u64>,
     pub data: PathBuf,
     conns: Arc<std::sync::atomic::AtomicU64>,
+    /// Nonces of the API requests of approved machines.
+    replay: Arc<Mutex<ReplayGuard>>,
+    /// Nonces of the agents' connections. Apart, and small: these come from machines that are not
+    /// approved yet too, and must not be able to fill the memory or push the others out.
+    agent_replay: Arc<Mutex<ReplayGuard>>,
 }
 
 pub type ApiError = (StatusCode, String);
@@ -58,11 +69,24 @@ pub async fn run(cfg: &Config, data: &Path) -> Result<()> {
     Ok(())
 }
 
+impl ServerState {
+    fn new(cfg: &Config, data: &Path) -> Result<ServerState> {
+        let (tx, rx) = watch::channel(1u64);
+        let dir = data.join("server");
+        let farm = Farm::open(cfg.farm_name.clone(), dir.clone(), tx)?;
+        Ok(ServerState {
+            farm: Arc::new(Mutex::new(farm)),
+            version: rx,
+            data: dir,
+            conns: Default::default(),
+            replay: Arc::new(Mutex::new(ReplayGuard::new(500_000))),
+            agent_replay: Arc::new(Mutex::new(ReplayGuard::new(20_000))),
+        })
+    }
+}
+
 pub fn open(cfg: &Config, data: &Path) -> Result<ServerState> {
-    let (tx, rx) = watch::channel(1u64);
-    let dir = data.join("server");
-    let farm = Farm::open(cfg.farm_name.clone(), dir.clone(), tx)?;
-    let state = ServerState { farm: Arc::new(Mutex::new(farm)), version: rx, data: dir, conns: Default::default() };
+    let state = ServerState::new(cfg, data)?;
     // Machines that stop talking are dropped from the farm by their WebSocket closing; this also
     // catches connections that hang without closing.
     let s = state.clone();
@@ -113,11 +137,52 @@ async fn require_trust(
     if addr.ip().is_loopback() {
         return next.run(req).await;
     }
-    let key = req.headers().get("x-openfarm-key").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    if s.farm.lock().unwrap().trusts_key(&key) {
-        return next.run(req).await;
+    match authenticate(&s, req).await {
+        Ok(req) => next.run(req).await,
+        Err(e) => refuse(addr, e),
     }
-    (StatusCode::UNAUTHORIZED, "Open OpenFarm on a machine that belongs to this farm.").into_response()
+}
+
+/// Answers a request that was not let in, and writes it in the log: at most one line a second, so
+/// nobody can fill the disk by knocking.
+fn refuse(addr: SocketAddr, e: AuthError) -> Response {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let second = now_ms() / 1000;
+    // A browser that is not part of the farm asks all the time: not worth a line.
+    if e != AuthError::Missing && LAST.swap(second, std::sync::atomic::Ordering::Relaxed) != second {
+        tracing::warn!(from = %addr.ip(), "refused: {e}");
+    }
+    e.into_response()
+}
+
+/// Lets a request from the network through only if an approved machine signed exactly this
+/// request, now, and it was not received before.
+async fn authenticate(s: &ServerState, req: Request) -> Result<Request, AuthError> {
+    let signed = Signed::from_headers(req.headers())?;
+    let now = now_ms();
+    let target = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or_default();
+    let fingerprint = signed.verify(req.method().as_str(), target, now)?;
+    if !s.farm.lock().unwrap().trusts_fingerprint(&fingerprint) {
+        return Err(AuthError::NotApproved);
+    }
+    let upload = req.method() == Method::POST && req.uri().path() == UPLOAD_PATH;
+    let req = match (upload, signed.content == auth::UNSIGNED_PAYLOAD) {
+        (true, true) => req,
+        (true, false) => return Err(AuthError::Malformed("a scene upload is sent with UNSIGNED-PAYLOAD")),
+        (false, true) => return Err(AuthError::Malformed("this request has to sign its body")),
+        (false, false) => {
+            let (parts, body) = req.into_parts();
+            let bytes = axum::body::to_bytes(body, auth::MAX_SIGNED_BODY)
+                .await
+                .map_err(|_| AuthError::Malformed("the body is too large or did not arrive whole"))?;
+            if auth::sha256_hex(&bytes) != signed.content {
+                return Err(AuthError::BodyChanged);
+            }
+            Request::from_parts(parts, Body::from(bytes))
+        }
+    };
+    s.replay.lock().unwrap().accept(&fingerprint, &signed, now)?;
+    Ok(req)
 }
 
 // ---- state and jobs --------------------------------------------------------------------------
@@ -301,34 +366,59 @@ async fn api_scene_download(State(s): State<ServerState>, UrlPath(hash): UrlPath
 async fn agent_ws(
     State(s): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    method: Method,
+    uri: Uri,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
     let rank: u8 = headers.get("x-openfarm-rank").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(1);
-    ws.max_message_size(64 << 20).on_upgrade(move |socket| agent_session(s, socket, addr, rank))
+    // Every agent, the server's own too, proves which key it holds before the connection opens.
+    // Whether that key is approved is decided after `Hello`: a new machine connects to ask for it.
+    let fingerprint = match agent_fingerprint(&s, &method, &uri, &headers) {
+        Ok(fingerprint) => fingerprint,
+        // OpenFarm 0.1.1 does not sign. Its window shows the status of the answer, so the status
+        // itself says what to do: "426 Upgrade Required".
+        Err(AuthError::Missing) => return refuse(addr, AuthError::Legacy),
+        Err(e) => return refuse(addr, e),
+    };
+    ws.max_message_size(64 << 20).on_upgrade(move |socket| agent_session(s, socket, addr, rank, fingerprint))
 }
 
-async fn agent_session(s: ServerState, socket: WebSocket, addr: SocketAddr, rank: u8) {
+/// The fingerprint of the key that signed an agent's request to connect.
+fn agent_fingerprint(s: &ServerState, method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<String, AuthError> {
+    let signed = Signed::from_headers(headers)?;
+    let now = now_ms();
+    let target = uri.path_and_query().map(|p| p.as_str()).unwrap_or_default();
+    let fingerprint = signed.verify(method.as_str(), target, now)?;
+    if signed.content != auth::sha256_hex(b"") {
+        return Err(AuthError::Malformed("the request that opens the connection has no body to sign"));
+    }
+    s.agent_replay.lock().unwrap().accept(&fingerprint, &signed, now)?;
+    Ok(fingerprint)
+}
+
+async fn agent_session(s: ServerState, socket: WebSocket, addr: SocketAddr, rank: u8, fingerprint: String) {
     let (mut sink, mut stream) = socket.split();
     // The first message must be Hello.
     let hello = loop {
         match stream.next().await {
             Some(Ok(Message::Text(t))) => match serde_json::from_str::<AgentMsg>(&t) {
-                Ok(AgentMsg::Hello { machine_id, name, key, version, protocol, caps }) => {
+                Ok(AgentMsg::Hello { machine_id, name, version, protocol, caps }) => {
                     if protocol != PROTOCOL {
-                        let _ = sink
-                            .send(Message::Text(
-                                json!({"type":"error","error": format!("protocol {protocol} is not {PROTOCOL}: update OpenFarm")})
-                                    .to_string()
-                                    .into(),
-                            ))
-                            .await;
+                        let refusal = ServerMsg::Error {
+                            error: format!(
+                                "This farm runs OpenFarm {VERSION} (protocol {PROTOCOL}) and this machine speaks protocol {protocol}: every computer of a farm needs the same version."
+                            ),
+                        };
+                        if let Ok(text) = serde_json::to_string(&refusal) {
+                            let _ = sink.send(Message::Text(text.into())).await;
+                        }
                         return;
                     }
                     break Hello {
                         machine_id,
                         name,
-                        key,
+                        fingerprint,
                         version,
                         caps,
                         rank,
@@ -367,6 +457,12 @@ async fn agent_session(s: ServerState, socket: WebSocket, addr: SocketAddr, rank
             continue;
         };
         let mut farm = s.farm.lock().unwrap();
+        // Only the machine's current connection speaks for it. One that was replaced, or that
+        // somebody else opened under the same machine id with another key, is not heard: the
+        // approval is for the key of the current one.
+        if farm.machines.get(&machine).map(|m| m.conn) != Some(conn) {
+            continue;
+        }
         match msg {
             AgentMsg::Hello { .. } => {}
             AgentMsg::Status { telemetry, accepting } => farm.status(&machine, telemetry, accepting),
@@ -406,6 +502,232 @@ async fn discovery(name: String, port: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::Identity;
+    use crate::TestDir;
+
+    const EMPTY: &[u8] = b"";
+
+    /// A farm that knows two machines: `a`, approved, and `p`, waiting for approval.
+    fn farm(dir: &TestDir) -> (ServerState, Identity, Identity) {
+        let state = ServerState::new(&Config::new(), dir.path()).unwrap();
+        let (approved, pending) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        {
+            let mut farm = state.farm.lock().unwrap();
+            connect(&mut farm, "a", &approved, 1);
+            connect(&mut farm, "p", &pending, 2);
+            farm.machine_action("a", "approve").unwrap();
+        }
+        (state, approved, pending)
+    }
+
+    fn connect(farm: &mut Farm, id: &str, identity: &Identity, conn: u64) -> bool {
+        let hello = Hello {
+            machine_id: id.into(),
+            name: id.to_uppercase(),
+            fingerprint: identity.fingerprint(),
+            version: VERSION.into(),
+            caps: Default::default(),
+            rank: 1,
+            address: "192.168.2.20".into(),
+            loopback: false,
+        };
+        farm.hello(hello, conn, mpsc::unbounded_channel().0)
+    }
+
+    fn request(method: &str, target: &str, body: &'static [u8], signed: Option<&Signed>) -> Request {
+        let mut builder = Request::builder().method(method).uri(target);
+        for (name, value) in signed.map(|s| s.headers()).into_iter().flatten() {
+            builder = builder.header(name, value);
+        }
+        builder.body(Body::from(body)).unwrap()
+    }
+
+    async fn check(state: &ServerState, method: &str, target: &str, body: &'static [u8], signed: &Signed) -> Result<(), AuthError> {
+        authenticate(state, request(method, target, body, Some(signed))).await.map(|_| ())
+    }
+
+    #[tokio::test]
+    async fn a_request_signed_by_an_approved_machine_is_let_in_with_its_body() {
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let body = br#"{"action":"pause"}"#;
+        let signed = a.sign("POST", "/api/v1/jobs/3/action", &auth::sha256_hex(body)).unwrap();
+        let req = authenticate(&state, request("POST", "/api/v1/jobs/3/action", body, Some(&signed))).await.unwrap();
+        assert_eq!(req.uri().path(), "/api/v1/jobs/3/action");
+        assert_eq!(axum::body::to_bytes(req.into_body(), 1024).await.unwrap().as_ref(), body);
+        let signed = a.sign("GET", "/api/v1/state?since=4", &auth::sha256_hex(EMPTY)).unwrap();
+        assert_eq!(check(&state, "GET", "/api/v1/state?since=4", EMPTY, &signed).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn unsigned_requests_and_the_key_of_0_1_1_are_refused() {
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let unsigned = authenticate(&state, request("GET", "/api/v1/state", EMPTY, None)).await;
+        assert_eq!(unsigned.err(), Some(AuthError::Missing));
+        // The old header is refused by itself, and also next to a signature that is right.
+        let old = Request::builder().uri("/api/v1/state").header(auth::LEGACY_KEY, "5f1d0c6a3b2e4f70").body(Body::empty()).unwrap();
+        assert_eq!(authenticate(&state, old).await.err(), Some(AuthError::Legacy));
+        let signed = a.sign("GET", "/api/v1/state", &auth::sha256_hex(EMPTY)).unwrap();
+        let mut both = request("GET", "/api/v1/state", EMPTY, Some(&signed));
+        both.headers_mut().insert(auth::LEGACY_KEY, "5f1d0c6a3b2e4f70".parse().unwrap());
+        assert_eq!(authenticate(&state, both).await.err(), Some(AuthError::Legacy));
+    }
+
+    #[tokio::test]
+    async fn only_approved_machines_are_let_in() {
+        let dir = TestDir::new();
+        let (state, a, p) = farm(&dir);
+        let stranger = Identity::generate().unwrap();
+        let empty = auth::sha256_hex(EMPTY);
+        for (identity, expected) in [(&a, Ok(())), (&p, Err(AuthError::NotApproved)), (&stranger, Err(AuthError::NotApproved))] {
+            let signed = identity.sign("GET", "/api/v1/state", &empty).unwrap();
+            assert_eq!(check(&state, "GET", "/api/v1/state", EMPTY, &signed).await, expected);
+        }
+        // Approving the waiting machine lets it in; a machine that comes back with another key
+        // is out until it is approved again, and so is one the farm forgot.
+        state.farm.lock().unwrap().machine_action("p", "approve").unwrap();
+        let signed = p.sign("GET", "/api/v1/state", &empty).unwrap();
+        assert_eq!(check(&state, "GET", "/api/v1/state", EMPTY, &signed).await, Ok(()));
+        assert!(!connect(&mut state.farm.lock().unwrap(), "a", &stranger, 3));
+        for identity in [&a, &stranger] {
+            let signed = identity.sign("GET", "/api/v1/state", &empty).unwrap();
+            assert_eq!(check(&state, "GET", "/api/v1/state", EMPTY, &signed).await, Err(AuthError::NotApproved));
+        }
+        {
+            let mut farm = state.farm.lock().unwrap();
+            farm.disconnected("p", 2);
+            farm.machine_action("p", "forget").unwrap();
+        }
+        let signed = p.sign("GET", "/api/v1/state", &empty).unwrap();
+        assert_eq!(check(&state, "GET", "/api/v1/state", EMPTY, &signed).await, Err(AuthError::NotApproved));
+    }
+
+    #[tokio::test]
+    async fn a_copy_of_a_request_is_refused() {
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let body = br#"{"action":"cancel"}"#;
+        let signed = a.sign("POST", "/api/v1/jobs/3/action", &auth::sha256_hex(body)).unwrap();
+        assert_eq!(check(&state, "POST", "/api/v1/jobs/3/action", body, &signed).await, Ok(()));
+        assert_eq!(check(&state, "POST", "/api/v1/jobs/3/action", body, &signed).await, Err(AuthError::Replayed));
+    }
+
+    #[tokio::test]
+    async fn a_signature_is_good_for_one_request_only() {
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let body = br#"{"action":"pause"}"#;
+        let signed = a.sign("POST", "/api/v1/jobs/3/action", &auth::sha256_hex(body)).unwrap();
+        let bad = Err(AuthError::BadSignature);
+        assert_eq!(check(&state, "POST", "/api/v1/jobs/4/action", body, &signed).await, bad, "path");
+        assert_eq!(check(&state, "POST", "/api/v1/machines/3/action", body, &signed).await, bad, "path");
+        assert_eq!(check(&state, "POST", "/api/v1/jobs/3/action?x=1", body, &signed).await, bad, "query");
+        assert_eq!(check(&state, "GET", "/api/v1/jobs/3/action", body, &signed).await, bad, "method");
+        let other = br#"{"action":"cancel"}"#;
+        assert_eq!(check(&state, "POST", "/api/v1/jobs/3/action", other, &signed).await, Err(AuthError::BodyChanged), "body");
+        assert_eq!(check(&state, "POST", "/api/v1/jobs/3/action", EMPTY, &signed).await, Err(AuthError::BodyChanged), "no body");
+        // None of the failed tries used the signature up: the real request still goes through.
+        assert_eq!(check(&state, "POST", "/api/v1/jobs/3/action", body, &signed).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn requests_from_another_time_are_refused() {
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let empty = auth::sha256_hex(EMPTY);
+        for (i, timestamp) in [now_ms() - auth::MAX_SKEW_MS - 60_000, now_ms() + auth::MAX_SKEW_MS + 60_000].into_iter().enumerate() {
+            let signed = a.sign_at("GET", "/api/v1/state", &empty, timestamp, &format!("{i:032x}"));
+            let refused = check(&state, "GET", "/api/v1/state", EMPTY, &signed).await.unwrap_err();
+            assert!(matches!(refused, AuthError::Clock { .. }), "{refused:?}");
+            assert!(refused.to_string().contains("clocks"));
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_scene_upload_may_leave_its_body_unsigned() {
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let scene = b"a scene of many gigabytes";
+        let upload = "/api/v1/scenes?name=shot.max";
+        let signed = a.sign("POST", upload, auth::UNSIGNED_PAYLOAD).unwrap();
+        assert_eq!(check(&state, "POST", upload, scene, &signed).await, Ok(()));
+        assert_eq!(check(&state, "POST", upload, scene, &signed).await, Err(AuthError::Replayed));
+        // Its name, in the query, is signed.
+        let signed = a.sign("POST", upload, auth::UNSIGNED_PAYLOAD).unwrap();
+        assert_eq!(check(&state, "POST", "/api/v1/scenes?name=other.max", scene, &signed).await, Err(AuthError::BadSignature));
+        // Everything else signs its body, and an upload does not pretend to.
+        for target in ["/api/v1/jobs", "/api/v1/scenes/from-path", "/api/v1/machines/a/action"] {
+            let signed = a.sign("POST", target, auth::UNSIGNED_PAYLOAD).unwrap();
+            assert!(matches!(check(&state, "POST", target, b"{}", &signed).await, Err(AuthError::Malformed(_))), "{target}");
+        }
+        let signed = a.sign("POST", upload, &auth::sha256_hex(scene)).unwrap();
+        assert!(matches!(check(&state, "POST", upload, scene, &signed).await, Err(AuthError::Malformed(_))));
+    }
+
+    #[tokio::test]
+    async fn an_agent_proves_its_key_to_connect() {
+        let dir = TestDir::new();
+        let (state, a, _) = farm(&dir);
+        let newcomer = Identity::generate().unwrap();
+        let uri: Uri = "/api/v1/agent".parse().unwrap();
+        let headers = |signed: &Signed| {
+            let mut headers = HeaderMap::new();
+            for (name, value) in signed.headers() {
+                headers.insert(name, value.parse().unwrap());
+            }
+            headers
+        };
+        let empty = auth::sha256_hex(EMPTY);
+        // A machine the farm has never seen may connect (to wait for approval): what counts is
+        // that the key is really its own.
+        for identity in [&a, &newcomer] {
+            let signed = identity.sign("GET", "/api/v1/agent", &empty).unwrap();
+            assert_eq!(agent_fingerprint(&state, &Method::GET, &uri, &headers(&signed)), Ok(identity.fingerprint()));
+            // The same request again is somebody else sending a copy.
+            assert_eq!(agent_fingerprint(&state, &Method::GET, &uri, &headers(&signed)), Err(AuthError::Replayed));
+        }
+        assert_eq!(agent_fingerprint(&state, &Method::GET, &uri, &HeaderMap::new()), Err(AuthError::Missing));
+        // A signature made for an API request does not open a connection.
+        let signed = a.sign("GET", "/api/v1/state", &empty).unwrap();
+        assert_eq!(agent_fingerprint(&state, &Method::GET, &uri, &headers(&signed)), Err(AuthError::BadSignature));
+        let old = a.sign_at("GET", "/api/v1/agent", &empty, now_ms() - 3_600_000, "000102030405060708090a0b0c0d0e0f");
+        assert!(matches!(agent_fingerprint(&state, &Method::GET, &uri, &headers(&old)), Err(AuthError::Clock { .. })));
+    }
+
+    #[tokio::test]
+    async fn a_machine_is_approved_by_the_key_it_proved() {
+        let dir = TestDir::new();
+        let (state, a, p) = farm(&dir);
+        let mut farm = state.farm.lock().unwrap();
+        assert!(farm.trusts_fingerprint(&a.fingerprint()));
+        assert!(!farm.trusts_fingerprint(&p.fingerprint()));
+        assert!(!farm.trusts_fingerprint(""));
+        // The server's own agent (loopback) needs no approval.
+        let own = Identity::generate().unwrap();
+        let hello = Hello {
+            machine_id: "own".into(),
+            name: "SERVER".into(),
+            fingerprint: own.fingerprint(),
+            version: VERSION.into(),
+            caps: Default::default(),
+            rank: 2,
+            address: "127.0.0.1".into(),
+            loopback: true,
+        };
+        assert!(farm.hello(hello, 9, mpsc::unbounded_channel().0));
+        assert!(farm.trusts_fingerprint(&own.fingerprint()));
+        drop(farm);
+        // What the farm keeps on disk is the fingerprint: after a restart the same machines are
+        // trusted, and one that never proved a key cannot be approved.
+        drop(state);
+        let state = ServerState::new(&Config::new(), dir.path()).unwrap();
+        let mut farm = state.farm.lock().unwrap();
+        assert!(farm.trusts_fingerprint(&a.fingerprint()) && farm.trusts_fingerprint(&own.fingerprint()));
+        assert!(!farm.trusts_fingerprint(&p.fingerprint()));
+        assert!(farm.machine_action("p", "approve").is_err());
+        assert!(!farm.machines["p"].approved);
+    }
 
     #[test]
     fn file_names_are_kept_inside_the_store() {

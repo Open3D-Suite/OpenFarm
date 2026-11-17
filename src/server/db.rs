@@ -29,12 +29,38 @@ pub struct StoredJob {
 pub struct StoredMachine {
     pub id: String,
     pub name: String,
-    pub key: Option<String>,
+    /// SHA-256 of the public key the machine was approved with. It recognises the machine and
+    /// cannot be used to act as it.
+    pub fingerprint: Option<String>,
     pub approved: bool,
     pub enabled: bool,
     pub caps: Capabilities,
     pub rank: u8,
     pub last_seen: u64,
+}
+
+/// Farms made by OpenFarm 0.1.1 kept every machine's secret key in clear in the `key` column.
+/// This takes the column out, wipes what it held from the file and leaves every machine waiting
+/// for approval again: from now on the farm knows them by the fingerprint of their public key.
+fn drop_stored_keys(conn: &Connection) -> Result<()> {
+    let old = conn.prepare("SELECT 1 FROM pragma_table_info('machines') WHERE name = 'key'")?.exists([])?;
+    if !old {
+        return Ok(());
+    }
+    // Dropping the column alone would leave the keys in pages SQLite no longer uses and in its
+    // write-ahead log: VACUUM writes the file again without them and the checkpoint empties the log.
+    conn.execute_batch(
+        "PRAGMA secure_delete=ON;
+         BEGIN;
+         UPDATE machines SET key = NULL, approved = 0;
+         ALTER TABLE machines DROP COLUMN key;
+         ALTER TABLE machines ADD COLUMN fingerprint TEXT;
+         COMMIT;
+         VACUUM;
+         PRAGMA wal_checkpoint(TRUNCATE);",
+    )?;
+    tracing::warn!("this farm was made by OpenFarm 0.1.1: the machine keys it stored were erased; approve the machines again");
+    Ok(())
 }
 
 fn word<T: Serialize>(v: &T) -> String {
@@ -66,10 +92,11 @@ impl Db {
                 id INTEGER PRIMARY KEY, job INTEGER NOT NULL, frames TEXT NOT NULL, machine TEXT NOT NULL,
                 slot TEXT NOT NULL, state TEXT NOT NULL, started INTEGER NOT NULL, finished INTEGER, error TEXT);
              CREATE TABLE IF NOT EXISTS machines (
-                id TEXT PRIMARY KEY, name TEXT NOT NULL, key TEXT, approved INTEGER NOT NULL DEFAULT 0,
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, fingerprint TEXT, approved INTEGER NOT NULL DEFAULT 0,
                 enabled INTEGER NOT NULL DEFAULT 1, caps TEXT NOT NULL DEFAULT '{}', rank INTEGER NOT NULL DEFAULT 1,
                 last_seen INTEGER NOT NULL DEFAULT 0);",
         )?;
+        drop_stored_keys(&conn)?;
         Ok(Db { conn })
     }
 
@@ -141,13 +168,13 @@ impl Db {
 
     pub fn save_machine(&self, m: &StoredMachine) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO machines (id, name, key, approved, enabled, caps, rank, last_seen)
+            "INSERT INTO machines (id, name, fingerprint, approved, enabled, caps, rank, last_seen)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(id) DO UPDATE SET name=?2, key=?3, approved=?4, enabled=?5, caps=?6, rank=?7, last_seen=?8",
+             ON CONFLICT(id) DO UPDATE SET name=?2, fingerprint=?3, approved=?4, enabled=?5, caps=?6, rank=?7, last_seen=?8",
             params![
                 m.id,
                 m.name,
-                m.key,
+                m.fingerprint,
                 m.approved as i64,
                 m.enabled as i64,
                 serde_json::to_string(&m.caps)?,
@@ -221,13 +248,14 @@ impl Db {
     }
 
     pub fn load_machines(&self) -> Result<Vec<StoredMachine>> {
-        let mut st =
-            self.conn.prepare("SELECT id, name, key, approved, enabled, caps, rank, last_seen FROM machines ORDER BY name")?;
+        let mut st = self
+            .conn
+            .prepare("SELECT id, name, fingerprint, approved, enabled, caps, rank, last_seen FROM machines ORDER BY name")?;
         let rows = st.query_map([], |r| {
             Ok(StoredMachine {
                 id: r.get(0)?,
                 name: r.get(1)?,
-                key: r.get(2)?,
+                fingerprint: r.get(2)?,
                 approved: r.get::<_, i64>(3)? != 0,
                 enabled: r.get::<_, i64>(4)? != 0,
                 caps: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(),
@@ -262,5 +290,95 @@ impl Db {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TestDir;
+
+    fn machine(id: &str, fingerprint: Option<&str>, approved: bool) -> StoredMachine {
+        StoredMachine {
+            id: id.into(),
+            name: format!("name of {id}"),
+            fingerprint: fingerprint.map(String::from),
+            approved,
+            enabled: true,
+            caps: Capabilities::default(),
+            rank: 1,
+            last_seen: 7,
+        }
+    }
+
+    /// Is `text` anywhere in the files of the folder (the database, its log)?
+    fn on_disk(dir: &TestDir, text: &str) -> bool {
+        std::fs::read_dir(dir.path()).unwrap().any(|entry| {
+            let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+            bytes.windows(text.len()).any(|w| w == text.as_bytes())
+        })
+    }
+
+    #[test]
+    fn machines_are_stored_with_their_fingerprint() {
+        let dir = TestDir::new();
+        let path = dir.path().join("farm.sqlite");
+        {
+            let db = Db::open(&path).unwrap();
+            db.save_machine(&machine("a", Some("ab12"), true)).unwrap();
+            db.save_machine(&machine("b", None, false)).unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        let machines = db.load_machines().unwrap();
+        assert_eq!(machines.len(), 2);
+        assert_eq!((machines[0].fingerprint.as_deref(), machines[0].approved), (Some("ab12"), true));
+        assert_eq!((machines[1].fingerprint.as_deref(), machines[1].approved), (None, false));
+        db.forget_machine("a").unwrap();
+        assert_eq!(db.load_machines().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_keys_a_0_1_1_farm_stored_are_erased() {
+        let dir = TestDir::new();
+        let path = dir.path().join("farm.sqlite");
+        let key = "9c1e5a0b7d3f4e6281a4c7f0b3d6e9a29c1e5a0b7d3f4e6281a4c7f0b3d6e9a2";
+        {
+            // The machines table as OpenFarm 0.1.1 made it, with an approved machine in it.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "PRAGMA journal_mode=WAL;
+                 CREATE TABLE machines (
+                    id TEXT PRIMARY KEY, name TEXT NOT NULL, key TEXT, approved INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1, caps TEXT NOT NULL DEFAULT '{}', rank INTEGER NOT NULL DEFAULT 1,
+                    last_seen INTEGER NOT NULL DEFAULT 0);",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO machines (id, name, key, approved, enabled, rank, last_seen) VALUES ('m1', 'NODE-07', ?1, 1, 0, 0, 1234)",
+                params![key],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO machines (id, name, approved) VALUES ('m2', 'WS-02', 0)", []).unwrap();
+        }
+        assert!(on_disk(&dir, key), "the test needs the old key in the file to begin with");
+
+        let db = Db::open(&path).unwrap();
+        assert!(!on_disk(&dir, key), "the old key is still in the database files");
+        let machines = db.load_machines().unwrap();
+        assert_eq!(machines.len(), 2);
+        let m1 = machines.iter().find(|m| m.id == "m1").unwrap();
+        // The machine is still known, with its settings, but has to be approved again.
+        assert_eq!((m1.name.as_str(), m1.enabled, m1.rank, m1.last_seen), ("NODE-07", false, 0, 1234));
+        assert_eq!((m1.fingerprint.as_deref(), m1.approved), (None, false));
+        assert!(machines.iter().all(|m| !m.approved && m.fingerprint.is_none()));
+
+        // Approving it stores a fingerprint, and opening the farm again changes nothing.
+        db.save_machine(&StoredMachine { fingerprint: Some("ab12".into()), approved: true, ..machine("m1", None, false) }).unwrap();
+        drop(db);
+        let db = Db::open(&path).unwrap();
+        let machines = db.load_machines().unwrap();
+        let m1 = machines.iter().find(|m| m.id == "m1").unwrap();
+        assert_eq!((m1.fingerprint.as_deref(), m1.approved), (Some("ab12"), true));
+        assert!(!on_disk(&dir, key));
     }
 }

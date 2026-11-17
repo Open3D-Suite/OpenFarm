@@ -14,6 +14,30 @@ pub mod server;
 pub mod ui;
 pub mod window;
 
+/// A folder of its own for one test, removed when the test ends.
+#[cfg(test)]
+pub(crate) struct TestDir(std::path::PathBuf);
+
+#[cfg(test)]
+impl TestDir {
+    pub(crate) fn new() -> TestDir {
+        let dir = std::env::temp_dir().join(format!("openfarm-test-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).expect("a folder for the test");
+        TestDir(dir)
+    }
+
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// Starts OpenFarm again with the same arguments (after a change of role), telling the new
 /// process to wait for this one's port instead of handing over to it.
 pub fn relaunch() {

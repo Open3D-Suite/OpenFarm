@@ -132,7 +132,16 @@ fn main() {
     if changed {
         let _ = cfg.save(&data);
     }
-    tracing::info!(version = openfarm::config::VERSION, role = ?cfg.role, data = %data.display(), "OpenFarm starting");
+    // This machine's key pair: it signs everything this machine sends to the farm server.
+    let identity = match cfg.identity() {
+        Ok(i) => Arc::new(i),
+        Err(e) => {
+            tracing::error!("this machine's key: {e:#}");
+            eprintln!("OpenFarm: {e:#}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!(version = openfarm::config::VERSION, role = ?cfg.role, data = %data.display(), key = %identity.fingerprint(), "OpenFarm starting");
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio");
     // One OpenFarm per data folder: a second start shows the first one's window.
@@ -159,6 +168,7 @@ fn main() {
         cfg: Arc::new(Mutex::new(cfg.clone())),
         data: data.clone(),
         agent: status.clone(),
+        identity: identity.clone(),
         http: reqwest::Client::builder().connect_timeout(Duration::from_secs(5)).build().expect("http"),
         control: ctl_tx,
     };
@@ -180,7 +190,7 @@ fn main() {
         rt.spawn(async move {
             // The server's own agent waits for the server to be listening.
             tokio::time::sleep(Duration::from_millis(500)).await;
-            if let Err(e) = openfarm::agent::run(c, d, s).await {
+            if let Err(e) = openfarm::agent::run(c, d, s, identity).await {
                 tracing::error!("agent: {e:#}");
             }
         });

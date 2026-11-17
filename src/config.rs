@@ -3,8 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+
+use crate::auth::Identity;
 
 pub const SERVER_PORT: u16 = 47100;
 pub const DISCOVERY_PORT: u16 = 47101;
@@ -47,8 +51,11 @@ pub struct Config {
     pub name: String,
     /// Stable identity of this machine in the farm.
     pub machine_id: String,
-    /// Secret sent to the server; the server remembers it once the machine is approved.
-    pub key: String,
+    /// This machine's private key (Ed25519), which signs what it sends to the farm server. It is
+    /// kept encrypted by Windows for this user (DPAPI) and written in base64, so the file gives
+    /// nothing away and is useless on another computer. Made on the first start.
+    #[serde(default)]
+    pub private_key: String,
     /// The farm's name, on a server.
     #[serde(default)]
     pub farm_name: String,
@@ -89,7 +96,7 @@ impl Config {
             render: true,
             name: computer_name(),
             machine_id: uuid::Uuid::new_v4().to_string(),
-            key: format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()),
+            private_key: String::new(),
             farm_name: format!("{} farm", computer_name()),
             blender_path: None,
             max_batch_path: None,
@@ -101,17 +108,44 @@ impl Config {
 
     pub fn load_or_create(data: &Path) -> Result<Config> {
         let path = data.join("config.json");
-        if path.exists() {
+        let (mut cfg, mut save) = if path.exists() {
             let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-            let mut cfg: Config = serde_json::from_str(&text).with_context(|| format!("reading {}", path.display()))?;
-            if cfg.name.trim().is_empty() {
-                cfg.name = computer_name();
-            }
-            return Ok(cfg);
+            let value: serde_json::Value = serde_json::from_str(&text).with_context(|| format!("reading {}", path.display()))?;
+            // OpenFarm 0.1.1 kept the machine's secret in clear under "key". It is not read any
+            // more; saving the settings again takes it out of the file.
+            let old_key = value.get("key").is_some();
+            let cfg: Config = serde_json::from_value(value).with_context(|| format!("reading {}", path.display()))?;
+            (cfg, old_key)
+        } else {
+            (Config::new(), true)
+        };
+        if cfg.name.trim().is_empty() {
+            cfg.name = computer_name();
         }
-        let cfg = Config::new();
-        cfg.save(data)?;
+        if let Err(e) = cfg.identity() {
+            if !cfg.private_key.is_empty() {
+                // Settings copied from another computer or another user: the key in them is not ours.
+                tracing::warn!("this machine's key cannot be read ({e:#}); it gets a new one and the farm has to approve it again");
+            }
+            cfg.private_key = protected(&Identity::generate()?)?;
+            save = true;
+        }
+        if save {
+            cfg.save(data)?;
+        }
         Ok(cfg)
+    }
+
+    /// This machine's key pair, read back from its protected form.
+    pub fn identity(&self) -> Result<Identity> {
+        if self.private_key.is_empty() {
+            bail!("this machine has no key yet");
+        }
+        let blob = BASE64.decode(&self.private_key).context("this machine's key is not base64")?;
+        let mut secret = crate::dpapi::unprotect(&blob)?;
+        let identity = Identity::from_secret(&secret);
+        secret.fill(0);
+        identity
     }
 
     pub fn save(&self, data: &Path) -> Result<()> {
@@ -153,6 +187,14 @@ impl Default for Config {
     }
 }
 
+/// A private key as it is written in the settings: encrypted for this Windows user, in base64.
+fn protected(identity: &Identity) -> Result<String> {
+    let mut secret = identity.secret();
+    let blob = crate::dpapi::protect(&secret);
+    secret.fill(0);
+    Ok(BASE64.encode(blob?))
+}
+
 pub fn computer_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "this-computer".into())
 }
@@ -172,6 +214,7 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestDir;
 
     #[test]
     fn server_urls() {
@@ -183,5 +226,77 @@ mod tests {
         assert_eq!(c.server_url(), "http://farm:5000");
         c.role = Role::Server;
         assert_eq!(c.server_url(), "http://127.0.0.1:47100");
+    }
+
+    fn on_disk(dir: &TestDir) -> (String, serde_json::Value) {
+        let text = std::fs::read_to_string(dir.path().join("config.json")).unwrap();
+        let value = serde_json::from_str(&text).unwrap();
+        (text, value)
+    }
+
+    #[test]
+    fn a_new_machine_gets_a_key_that_is_not_readable_on_disk() {
+        let dir = TestDir::new();
+        let cfg = Config::load_or_create(dir.path()).unwrap();
+        let identity = cfg.identity().unwrap();
+        let (text, value) = on_disk(&dir);
+        assert!(value.get("key").is_none());
+        let blob = BASE64.decode(value["private_key"].as_str().unwrap()).unwrap();
+        let secret = identity.secret();
+        assert!(!blob.windows(secret.len()).any(|w| w == secret), "the private key is on disk in clear");
+        // Starting again finds the same key and leaves the file alone.
+        let again = Config::load_or_create(dir.path()).unwrap();
+        assert_eq!(again.identity().unwrap().fingerprint(), identity.fingerprint());
+        assert_eq!(on_disk(&dir).0, text);
+    }
+
+    #[test]
+    fn the_plain_key_of_0_1_1_is_dropped() {
+        let dir = TestDir::new();
+        let old_key = "5f1d0c6a3b2e4f708192a3b4c5d6e7f85f1d0c6a3b2e4f708192a3b4c5d6e7f8";
+        let old = format!(
+            r#"{{
+  "role": "agent",
+  "kind": "node",
+  "server": "192.168.2.10",
+  "render": true,
+  "name": "NODE-07",
+  "machine_id": "0b6c2a54-6f0e-4c0e-9a51-0d4d0f4b7a11",
+  "key": "{old_key}",
+  "farm_name": "NODE-07 farm",
+  "blender_path": null,
+  "max_batch_path": "D:\\Max\\3dsmaxbatch.exe",
+  "server_port": 47100,
+  "local_port": 47102,
+  "discovery": true
+}}"#
+        );
+        std::fs::write(dir.path().join("config.json"), old).unwrap();
+        let cfg = Config::load_or_create(dir.path()).unwrap();
+        // Everything else is kept…
+        assert_eq!((cfg.role, cfg.kind), (Role::Agent, MachineKind::Node));
+        assert_eq!((cfg.server.as_str(), cfg.name.as_str()), ("192.168.2.10", "NODE-07"));
+        assert_eq!(cfg.machine_id, "0b6c2a54-6f0e-4c0e-9a51-0d4d0f4b7a11");
+        assert_eq!(cfg.max_batch_path.as_deref(), Some(r"D:\Max\3dsmaxbatch.exe"));
+        // …the machine has a key pair now, and the old secret is gone from the file.
+        let identity = cfg.identity().unwrap();
+        let (text, value) = on_disk(&dir);
+        assert!(value.get("key").is_none() && !text.contains(old_key), "{text}");
+        assert_eq!(value["machine_id"], "0b6c2a54-6f0e-4c0e-9a51-0d4d0f4b7a11");
+        let again = Config::load_or_create(dir.path()).unwrap();
+        assert_eq!(again.identity().unwrap().fingerprint(), identity.fingerprint());
+    }
+
+    #[test]
+    fn a_key_from_another_computer_is_replaced() {
+        let dir = TestDir::new();
+        let mut cfg = Config::load_or_create(dir.path()).unwrap();
+        cfg.private_key = BASE64.encode(b"protected somewhere else");
+        cfg.save(dir.path()).unwrap();
+        assert!(cfg.identity().is_err());
+        let fixed = Config::load_or_create(dir.path()).unwrap();
+        assert!(fixed.identity().is_ok());
+        assert_eq!(fixed.machine_id, cfg.machine_id);
+        assert_eq!(on_disk(&dir).1["private_key"], fixed.private_key.as_str());
     }
 }

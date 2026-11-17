@@ -23,6 +23,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
+use crate::auth::{self, Identity};
 use crate::config::{Config, VERSION};
 use hosts::HostProc;
 
@@ -55,7 +56,8 @@ pub struct AgentCtx {
     pub data: PathBuf,
     pub scripts: PathBuf,
     pub server_url: String,
-    pub key: String,
+    /// This machine's key pair: it signs what the agent asks of the server.
+    pub identity: Arc<Identity>,
     pub caps: Capabilities,
     pub http: reqwest::Client,
     pub out: mpsc::UnboundedSender<AgentMsg>,
@@ -67,7 +69,7 @@ pub struct AgentCtx {
 pub type SharedStatus = Arc<Mutex<AgentStatus>>;
 
 /// Runs the agent until the process ends, reconnecting whenever the server goes away.
-pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus) -> Result<()> {
+pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus, identity: Arc<Identity>) -> Result<()> {
     let agent_dir = data.join("agent");
     std::fs::create_dir_all(&agent_dir)?;
     let scripts = agent_dir.join("hosts");
@@ -90,7 +92,7 @@ pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus) -> Result<()>
         data: agent_dir,
         scripts,
         server_url: server_url.clone(),
-        key: cfg.key.clone(),
+        identity: identity.clone(),
         caps: caps.clone(),
         http,
         out: out_tx,
@@ -103,10 +105,17 @@ pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus) -> Result<()>
         set_state(&status, "connecting", &server_url, "");
         let mut request = ws_url.as_str().into_client_request()?;
         request.headers_mut().insert("x-openfarm-rank", cfg.rank().to_string().parse()?);
+        // The request that opens the connection is signed like any other (it has no body): that
+        // is how the server knows which key this machine holds. Signed again for every attempt.
+        let target = request.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
+        let signed = identity.sign(request.method().as_str(), &target, &auth::sha256_hex(b""))?;
+        for (name, value) in signed.headers() {
+            request.headers_mut().insert(name, value.parse()?);
+        }
         let ws = match tokio_tungstenite::connect_async(request).await {
             Ok((ws, _)) => ws,
             Err(e) => {
-                set_state(&status, "error", &server_url, &format!("cannot reach the farm server: {e}"));
+                set_state(&status, "error", &server_url, &refusal(&e).unwrap_or_else(|| format!("cannot reach the farm server: {e}")));
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 continue;
             }
@@ -115,7 +124,6 @@ pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus) -> Result<()>
         let hello = AgentMsg::Hello {
             machine_id: cfg.machine_id.clone(),
             name: cfg.name.clone(),
-            key: cfg.key.clone(),
             version: VERSION.into(),
             protocol: PROTOCOL,
             caps: caps.clone(),
@@ -126,6 +134,9 @@ pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus) -> Result<()>
         // Messages queued while disconnected are stale: drop them.
         while out_rx.try_recv().is_ok() {}
         let mut tick = tokio::time::interval(Duration::from_secs(3));
+        // Why the server ended the connection, when it said so, and whether it ever answered.
+        let mut refused: Option<String> = None;
+        let mut welcomed = false;
         loop {
             tokio::select! {
                 msg = stream.next() => {
@@ -137,10 +148,15 @@ pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus) -> Result<()>
                     };
                     match msg {
                         ServerMsg::Welcome { approved, server_name, .. } => {
+                            welcomed = true;
                             let mut s = status.lock().unwrap();
                             s.farm = server_name;
                             s.state = if approved { "connected" } else { "waiting_approval" }.into();
                             s.message.clear();
+                        }
+                        ServerMsg::Error { error } => {
+                            refused = Some(error);
+                            break;
                         }
                         ServerMsg::SetEnabled { enabled } => status.lock().unwrap().enabled = enabled,
                         ServerMsg::Assign(a) => {
@@ -204,9 +220,23 @@ pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus) -> Result<()>
         for (_, (t, _)) in running.drain() {
             t.cancel();
         }
-        set_state(&status, "error", &server_url, "lost the connection to the farm server; trying again");
+        let why = match refused {
+            Some(error) => error,
+            // A server that hangs up before saying anything did not understand `Hello`.
+            None if !welcomed => "the farm server closed the connection without answering: it may run another version of OpenFarm (every computer of a farm needs the same one); trying again".to_string(),
+            None => "lost the connection to the farm server; trying again".to_string(),
+        };
+        set_state(&status, "error", &server_url, &why);
         tokio::time::sleep(Duration::from_secs(3)).await;
     }
+}
+
+/// What the server answered when it refused the connection (the clocks differ, an old version),
+/// in its own words.
+fn refusal(e: &tokio_tungstenite::tungstenite::Error) -> Option<String> {
+    let tokio_tungstenite::tungstenite::Error::Http(response) = e else { return None };
+    let text = String::from_utf8_lossy(response.body().as_deref()?).trim().to_string();
+    (!text.is_empty()).then(|| format!("the farm server refused the connection: {text}"))
 }
 
 fn set_state(status: &SharedStatus, state: &str, server: &str, message: &str) {

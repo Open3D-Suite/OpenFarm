@@ -6,17 +6,19 @@ use serde::{Deserialize, Serialize};
 use crate::model::{Capabilities, Engine, OutputSpec, SceneRef, SlotKind, Telemetry};
 
 /// Bumped when a message changes in a way an older side can't read.
-pub const PROTOCOL: u32 = 1;
+///
+/// 2: the agent signs the request that opens the WebSocket and `Hello` no longer carries a key;
+/// the server can answer with `Error`.
+pub const PROTOCOL: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentMsg {
-    /// First message on every connection.
+    /// First message on every connection. Who the machine is was proved before, by the signature
+    /// on the request that opened the connection.
     Hello {
         machine_id: String,
         name: String,
-        /// The agent's secret, made on its first start. The server keeps it once the machine is approved.
-        key: String,
         version: String,
         protocol: u32,
         caps: Capabilities,
@@ -90,6 +92,10 @@ pub enum ServerMsg {
     SetEnabled {
         enabled: bool,
     },
+    /// The server will not talk to this agent (another protocol): it says why and closes.
+    Error {
+        error: String,
+    },
 }
 
 /// One task for one slot of the agent.
@@ -131,5 +137,25 @@ mod tests {
         let w = ServerMsg::SetEnabled { enabled: false };
         let s = serde_json::to_string(&w).unwrap();
         assert_eq!(serde_json::from_str::<ServerMsg>(&s).unwrap(), w);
+    }
+
+    #[test]
+    fn hello_carries_no_secret() {
+        let hello = AgentMsg::Hello {
+            machine_id: "m".into(),
+            name: "NODE-07".into(),
+            version: "0.1.1".into(),
+            protocol: PROTOCOL,
+            caps: Capabilities::default(),
+        };
+        let s = serde_json::to_string(&hello).unwrap();
+        assert!(!s.contains("key"), "{s}");
+        assert_eq!(serde_json::from_str::<AgentMsg>(&s).unwrap(), hello);
+        // What the server sends when it refuses an agent is a message the agent can read.
+        let refusal = r#"{"type":"error","error":"protocol 1 is not 2: update OpenFarm"}"#;
+        assert_eq!(
+            serde_json::from_str::<ServerMsg>(refusal).unwrap(),
+            ServerMsg::Error { error: "protocol 1 is not 2: update OpenFarm".into() }
+        );
     }
 }

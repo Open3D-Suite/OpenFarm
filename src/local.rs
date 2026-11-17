@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The local app: a small web server on 127.0.0.1 that this machine's window and the 3ds Max and
 //! Blender submitters talk to. It serves the interface, the first-run setup and this machine's
-//! status, and relays `/api/v1/*` to the farm server with this machine's key.
+//! status, and relays `/api/v1/*` to the farm server, signed with this machine's key.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::time::Duration;
 use anyhow::Result;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::agent::SharedStatus;
+use crate::auth::{self, Identity};
 use crate::config::{Config, MachineKind, Role, VERSION};
 
 #[derive(Clone)]
@@ -26,6 +27,8 @@ pub struct LocalState {
     pub cfg: Arc<Mutex<Config>>,
     pub data: PathBuf,
     pub agent: SharedStatus,
+    /// This machine's key pair: it signs what is relayed to the farm server.
+    pub identity: Arc<Identity>,
     pub http: reqwest::Client,
     /// Asks the window to show itself / the process to end.
     pub control: tokio::sync::mpsc::UnboundedSender<Control>,
@@ -162,29 +165,53 @@ async fn install(
     }
 }
 
-/// Relays a farm API call to the server with this machine's key.
+/// Relays a farm API call to the server, signed by this machine.
+///
+/// The signature covers the body, so the body is read whole first. The exception is a scene
+/// upload, which can be many gigabytes and is passed on as it arrives: its signature covers
+/// everything but the body (`UNSIGNED-PAYLOAD`).
 async fn proxy(State(s): State<LocalState>, req: Request) -> Response {
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
     if !path.starts_with("/api/v1/") {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let (url, key, role) = {
+    let (url, role) = {
         let cfg = s.cfg.lock().unwrap();
-        (format!("{}{}", cfg.server_url(), path), cfg.key.clone(), cfg.role)
+        (format!("{}{}", cfg.server_url(), path), cfg.role)
     };
     if role == Role::Unset {
         return (StatusCode::SERVICE_UNAVAILABLE, "OpenFarm is not set up yet").into_response();
     }
+    // What is signed is the path and query of the address as it will really be sent.
+    let url = match reqwest::Url::parse(&url) {
+        Ok(url) => url,
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("the farm server's address is not valid: {e}")).into_response(),
+    };
     let method = req.method().clone();
+    let upload = method == reqwest::Method::POST && url.path() == "/api/v1/scenes";
     let mut headers = HeaderMap::new();
     for name in ["content-type", "content-length"] {
+        // The length of a body read whole is set from the body itself.
+        if name == "content-length" && !upload {
+            continue;
+        }
         if let Some(v) = req.headers().get(name) {
             headers.insert(HeaderName::from_static(name), v.clone());
         }
     }
-    headers.insert("x-openfarm-key", HeaderValue::from_str(&key).unwrap_or(HeaderValue::from_static("")));
-    let body = reqwest::Body::wrap_stream(req.into_body().into_data_stream());
-    let resp = match s.http.request(method, &url).headers(headers).body(body).send().await {
+    let (content, body) = if upload {
+        (auth::UNSIGNED_PAYLOAD.to_string(), reqwest::Body::wrap_stream(req.into_body().into_data_stream()))
+    } else {
+        match axum::body::to_bytes(req.into_body(), auth::MAX_SIGNED_BODY).await {
+            Ok(bytes) => (auth::sha256_hex(&bytes), reqwest::Body::from(bytes)),
+            Err(_) => return (StatusCode::PAYLOAD_TOO_LARGE, "the request is too large to send to the farm").into_response(),
+        }
+    };
+    let request = match s.identity.request(&s.http, method, url, &content) {
+        Ok(request) => request,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
+    };
+    let resp = match request.headers(headers).body(body).send().await {
         Ok(r) => r,
         Err(e) => return (StatusCode::BAD_GATEWAY, format!("cannot reach the farm server: {e}")).into_response(),
     };
