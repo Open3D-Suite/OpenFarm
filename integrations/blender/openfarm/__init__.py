@@ -32,9 +32,9 @@ def call(path, body=None, data=None, headers=None):
         with urllib.request.urlopen(req, timeout=600) as r:
             return json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
-        raise RuntimeError(e.read().decode(errors="replace") or str(e))
-    except urllib.error.URLError:
-        raise RuntimeError("OpenFarm is not running on this computer. Open OpenFarm and try again.")
+        raise RuntimeError(e.read().decode(errors="replace") or str(e)) from e
+    except urllib.error.URLError as e:
+        raise RuntimeError("OpenFarm is not running on this computer. Open OpenFarm and try again.") from e
 
 
 def _redraw():
