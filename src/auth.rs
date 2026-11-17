@@ -281,12 +281,15 @@ impl std::fmt::Display for AuthError {
                 "This farm no longer takes the keys of OpenFarm 0.1.1: update OpenFarm on this machine (every computer of a farm needs the same version).",
             ),
             AuthError::Malformed(what) => write!(f, "The request's signature cannot be read: {what}."),
-            AuthError::Clock { skew_ms } => write!(
-                f,
-                "The clocks of this computer and of the farm server differ by {} (at most {} minutes are accepted): set the date and time on both.",
-                span(*skew_ms),
-                MAX_SKEW_MS / 60_000
-            ),
+            AuthError::Clock { skew_ms } => {
+                let limit = MAX_SKEW_MS / 60_000;
+                // Rounded, a difference just past the limit would read as the limit itself.
+                let by = if *skew_ms < MAX_SKEW_MS + 30_000 { format!("a little over {limit} minutes") } else { span(*skew_ms) };
+                write!(
+                    f,
+                    "The clocks of this computer and of the farm server differ by {by} (at most {limit} minutes are accepted): set the date and time on both."
+                )
+            }
             AuthError::BadSignature => f.write_str("The request's signature is not valid."),
             AuthError::NotApproved => {
                 f.write_str("This machine is not approved on this farm: approve it in Machines on the farm's computer.")
@@ -315,7 +318,7 @@ impl IntoResponse for AuthError {
 }
 
 fn span(ms: u64) -> String {
-    let minutes = ms / 60_000;
+    let minutes = ms.saturating_add(30_000) / 60_000;
     match minutes {
         0..=119 => format!("about {} minutes", minutes.max(1)),
         120..=2879 => format!("about {} hours", minutes / 60),
@@ -455,6 +458,10 @@ mod tests {
         assert_eq!(early.status(), StatusCode::UNAUTHORIZED);
         let text = early.to_string();
         assert!(text.contains("clocks") && text.contains("about 3 hours") && text.contains("5 minutes"), "{text}");
+        // A request signed ten minutes ahead arrives a moment later: still "10 minutes", not 9.
+        assert!(AuthError::Clock { skew_ms: 599_950 }.to_string().contains("about 10 minutes"));
+        assert!(AuthError::Clock { skew_ms: MAX_SKEW_MS + 1 }.to_string().contains("a little over 5 minutes"));
+        assert!(AuthError::Clock { skew_ms: 4 * 86_400_000 }.to_string().contains("about 4 days"));
     }
 
     #[test]
