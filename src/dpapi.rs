@@ -21,14 +21,16 @@ fn blob(bytes: &[u8]) -> CRYPT_INTEGER_BLOB {
 ///
 /// SAFETY: `out` must have been filled by CryptProtectData or CryptUnprotectData.
 unsafe fn take(out: CRYPT_INTEGER_BLOB) -> Vec<u8> {
-    if out.pbData.is_null() {
-        return Vec::new();
+    unsafe {
+        if out.pbData.is_null() {
+            return Vec::new();
+        }
+        let bytes = std::slice::from_raw_parts_mut(out.pbData, out.cbData as usize);
+        let copy = bytes.to_vec();
+        bytes.fill(0);
+        let _ = LocalFree(Some(HLOCAL(out.pbData as *mut c_void)));
+        copy
     }
-    let bytes = std::slice::from_raw_parts_mut(out.pbData, out.cbData as usize);
-    let copy = bytes.to_vec();
-    bytes.fill(0);
-    let _ = LocalFree(Some(HLOCAL(out.pbData as *mut c_void)));
-    copy
 }
 
 /// Encrypts `secret` for the current Windows user.

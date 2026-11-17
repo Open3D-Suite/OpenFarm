@@ -107,7 +107,7 @@ fn main() {
     };
     let mut changed = false;
     macro_rules! set {
-        ($field:ident, $value:expr) => {
+        ($field:ident, $value:expr_2021) => {
             if let Some(v) = $value {
                 cfg.$field = v;
                 changed = true;

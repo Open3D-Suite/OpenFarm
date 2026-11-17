@@ -29,7 +29,7 @@ fn icon() -> Option<Icon> {
 
 fn ask_keep_running(hwnd: isize) -> Option<bool> {
     #[link(name = "user32")]
-    extern "system" {
+    unsafe extern "system" {
         fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, kind: u32) -> i32;
     }
     let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();

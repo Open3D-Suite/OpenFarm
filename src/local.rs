@@ -208,18 +208,19 @@ async fn proxy(State(s): State<LocalState>, req: Request) -> Response {
     }
     // The hash of an upload is worked out while it goes by, to check the server's answer with.
     let sent = upload.then(|| Arc::new(Mutex::new(blake3::Hasher::new())));
-    let (content, body) = if let Some(hasher) = sent.clone() {
-        let stream = req.into_body().into_data_stream().inspect(move |chunk| {
-            if let Ok(chunk) = chunk {
-                hasher.lock().unwrap().update(chunk);
-            }
-        });
-        (auth::UNSIGNED_PAYLOAD.to_string(), reqwest::Body::wrap_stream(stream))
-    } else {
-        match axum::body::to_bytes(req.into_body(), auth::MAX_SIGNED_BODY).await {
+    let (content, body) = match sent.clone() {
+        Some(hasher) => {
+            let stream = req.into_body().into_data_stream().inspect(move |chunk| {
+                if let Ok(chunk) = chunk {
+                    hasher.lock().unwrap().update(chunk);
+                }
+            });
+            (auth::UNSIGNED_PAYLOAD.to_string(), reqwest::Body::wrap_stream(stream))
+        }
+        _ => match axum::body::to_bytes(req.into_body(), auth::MAX_SIGNED_BODY).await {
             Ok(bytes) => (auth::sha256_hex(&bytes), reqwest::Body::from(bytes)),
             Err(_) => return (StatusCode::PAYLOAD_TOO_LARGE, "the request is too large to send to the farm").into_response(),
-        }
+        },
     };
     let request = match s.identity.request(&s.http, method, url, &content) {
         Ok(request) => request,
