@@ -11,10 +11,12 @@ use std::time::Duration;
 use anyhow::Result;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderName, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use futures_util::StreamExt;
+use openfarm_core::model::SceneRef;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -169,7 +171,8 @@ async fn install(
 ///
 /// The signature covers the body, so the body is read whole first. The exception is a scene
 /// upload, which can be many gigabytes and is passed on as it arrives: its signature covers
-/// everything but the body (`UNSIGNED-PAYLOAD`).
+/// everything but the body (`UNSIGNED-PAYLOAD`), and the body is checked afterwards against the
+/// hash the farm stored it under (`stored_upload`).
 async fn proxy(State(s): State<LocalState>, req: Request) -> Response {
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
     if !path.starts_with("/api/v1/") {
@@ -199,8 +202,15 @@ async fn proxy(State(s): State<LocalState>, req: Request) -> Response {
             headers.insert(HeaderName::from_static(name), v.clone());
         }
     }
-    let (content, body) = if upload {
-        (auth::UNSIGNED_PAYLOAD.to_string(), reqwest::Body::wrap_stream(req.into_body().into_data_stream()))
+    // The hash of an upload is worked out while it goes by, to check the server's answer with.
+    let sent = upload.then(|| Arc::new(Mutex::new(blake3::Hasher::new())));
+    let (content, body) = if let Some(hasher) = sent.clone() {
+        let stream = req.into_body().into_data_stream().inspect(move |chunk| {
+            if let Ok(chunk) = chunk {
+                hasher.lock().unwrap().update(chunk);
+            }
+        });
+        (auth::UNSIGNED_PAYLOAD.to_string(), reqwest::Body::wrap_stream(stream))
     } else {
         match axum::body::to_bytes(req.into_body(), auth::MAX_SIGNED_BODY).await {
             Ok(bytes) => (auth::sha256_hex(&bytes), reqwest::Body::from(bytes)),
@@ -215,6 +225,10 @@ async fn proxy(State(s): State<LocalState>, req: Request) -> Response {
         Ok(r) => r,
         Err(e) => return (StatusCode::BAD_GATEWAY, format!("cannot reach the farm server: {e}")).into_response(),
     };
+    if let Some(hasher) = sent.filter(|_| resp.status().is_success()) {
+        let sent = hasher.lock().unwrap().finalize();
+        return stored_upload(resp, sent).await;
+    }
     let mut out = Response::builder().status(resp.status().as_u16());
     for name in ["content-type", "content-length", "cache-control"] {
         if let Some(v) = resp.headers().get(name) {
@@ -222,4 +236,54 @@ async fn proxy(State(s): State<LocalState>, req: Request) -> Response {
         }
     }
     out.body(Body::from_stream(resp.bytes_stream())).unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+}
+
+/// The server's answer to a scene upload, passed on only if the farm stored the file that was sent.
+///
+/// The body of an upload is not signed, so somebody between this machine and the server could
+/// change it on the way. The farm names every scene by its BLAKE3 hash, and the job that follows,
+/// which is signed, asks for the scene by that hash. Checking the hash here closes the gap: a job
+/// can only render the very file its sender meant, or fail because the farm does not have it.
+async fn stored_upload(mut resp: reqwest::Response, sent: blake3::Hash) -> Response {
+    let mut answer = Vec::new();
+    loop {
+        match resp.chunk().await {
+            // The answer is one small JSON object.
+            Ok(Some(chunk)) if answer.len() + chunk.len() <= 64 * 1024 => answer.extend_from_slice(&chunk),
+            Ok(None) => break,
+            _ => return (StatusCode::BAD_GATEWAY, "the farm server's answer to the upload could not be read").into_response(),
+        }
+    }
+    if !is_stored(&answer, &sent) {
+        tracing::warn!("a scene upload was stored with another hash than the one sent");
+        return (
+            StatusCode::BAD_GATEWAY,
+            "The farm did not store the scene as it was sent: it changed on the way to the farm server. Send it again.",
+        )
+            .into_response();
+    }
+    ([(header::CONTENT_TYPE, "application/json")], answer).into_response()
+}
+
+/// Does the server's answer to an upload name the hash of what was sent?
+fn is_stored(answer: &[u8], sent: &blake3::Hash) -> bool {
+    serde_json::from_slice::<SceneRef>(answer).map(|stored| stored.hash == sent.to_hex().as_str()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_upload_counts_only_if_the_farm_stored_what_was_sent() {
+        let sent = blake3::hash(b"the scene");
+        let answer = |hash: &str| {
+            serde_json::to_vec(&SceneRef { hash: hash.into(), file_name: "shot.max".into(), original_path: String::new(), size: 9 }).unwrap()
+        };
+        assert!(is_stored(&answer(sent.to_hex().as_str()), &sent));
+        assert!(!is_stored(&answer(blake3::hash(b"another scene").to_hex().as_str()), &sent));
+        assert!(!is_stored(&answer(""), &sent));
+        assert!(!is_stored(b"{}", &sent));
+        assert!(!is_stored(b"not json", &sent));
+    }
 }
