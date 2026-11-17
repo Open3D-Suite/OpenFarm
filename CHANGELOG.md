@@ -2,6 +2,30 @@
 
 What changed for users in each version of OpenFarm, newest first.
 
+## In development
+
+**Not compatible with 0.1.1.** Update every computer of the farm at the same time, then approve the
+machines again on the farm's computer (*Machines*).
+
+- **Machines no longer send a secret key.** Until now every machine sent its key in clear with each
+  request and the farm kept all the keys in its database, so anybody who could read the network or that
+  file could act as a machine. Now each machine has a key pair: it signs every request, the private key
+  never leaves it, and the farm stores only a fingerprint. A copied request is refused, and so is one
+  signed more than five minutes away from the farm's clock (the message says the clocks differ).
+- **The key is protected on each machine.** It is kept encrypted by Windows for the user who runs
+  OpenFarm. The plain key of 0.1.1 is removed from the settings, and the keys a 0.1.1 farm stored are
+  erased from its database, the first time the new version starts.
+- **Scenes by path only from allowed folders.** *Submit* from another computer of the farm now works
+  only for scenes inside the folders listed under `scene_folders` in the farm computer's
+  `config.json` (none at first). From the farm's own computer, and from 3ds Max and Blender, nothing
+  changes.
+- **A changed upload is noticed.** A scene that does not reach the farm exactly as it was sent is
+  reported instead of being used.
+- **Clearer messages when versions do not match.** A 0.1.1 machine that tries to join gets "Upgrade
+  Required", and a machine turned away by the farm shows the farm's reason.
+
+The traffic between machines is still not encrypted: see *Security* in the README.
+
 ## 0.1.1 — 16 November 2026
 
 - **The program no longer names folders of the computer it was built on.** Earlier builds
