@@ -129,15 +129,35 @@ async fn run_inner(
 }
 
 /// The scene from the agent's cache, downloading it from the server the first time.
+///
+/// A job names its scene by the BLAKE3 hash of the file, and nothing that is not that file is
+/// handed to the render program. A download is hashed as it arrives and only kept if it is the
+/// scene. A file already in the cache is hashed the first time this run of OpenFarm uses it: it
+/// may have been stored by a version that did not check, or have changed on disk since, so being
+/// there does not make it trusted. Whatever fails the check is deleted.
 async fn ensure_scene(ctx: &Arc<AgentCtx>, a: &Assignment, rep: &mut Reporter, cancel: &CancellationToken) -> Result<PathBuf> {
-    let dir = ctx.data.join("cache").join("scenes").join(&a.scene.hash);
+    let wanted = a.scene.hash.as_str();
+    // Also what keeps the hash, which becomes a folder name, from being anything else.
+    if !is_blake3(wanted) {
+        bail!("the job does not name its scene by a BLAKE3 hash, so the scene cannot be checked");
+    }
+    let dir = ctx.data.join("cache").join("scenes").join(wanted);
     let path = dir.join(&a.scene.file_name);
-    if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+    let checked = || ctx.checked_scenes.lock().unwrap().contains(&path);
+    if checked() && tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Ok(path);
     }
     let _guard = ctx.downloads.lock().await; // one download at a time per machine
-    if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+    if checked() && tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Ok(path);
+    }
+    if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+        if hash_of(path.clone()).await? == wanted {
+            ctx.checked_scenes.lock().unwrap().insert(path.clone());
+            return Ok(path);
+        }
+        rep.log(format!("The copy of {} kept on this machine is not the scene the job names: deleted, downloading it again", a.scene.file_name));
+        tokio::fs::remove_file(&path).await?;
     }
     rep.log(format!("Downloading the scene {} ({:.1} MB)", a.scene.file_name, a.scene.size as f64 / 1e6));
     tokio::fs::create_dir_all(&dir).await?;
@@ -154,20 +174,69 @@ async fn ensure_scene(ctx: &Arc<AgentCtx>, a: &Assignment, rep: &mut Reporter, c
         let why = resp.text().await.unwrap_or_default();
         bail!("the server did not give the scene ({status}) {}", why.trim());
     }
-    let part = dir.join(format!("{}.part", a.scene.file_name));
-    let mut file = tokio::fs::File::create(&part).await?;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        if cancel.is_cancelled() {
-            bail!("canceled");
-        }
-        file.write_all(&chunk?).await?;
-    }
-    file.flush().await?;
-    drop(file);
-    tokio::fs::rename(&part, &path).await?;
-    rep.log(format!("Scene downloaded in {:.1} s", started.elapsed().as_secs_f64()));
+    store_scene(resp.bytes_stream(), &path, wanted, cancel).await?;
+    ctx.checked_scenes.lock().unwrap().insert(path.clone());
+    rep.log(format!("Scene downloaded and checked in {:.1} s", started.elapsed().as_secs_f64()));
     Ok(path)
+}
+
+/// Is this what a BLAKE3 hash looks like in hex (64 lowercase digits)?
+fn is_blake3(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The BLAKE3 hash of a file, in hex.
+async fn hash_of(path: PathBuf) -> Result<String> {
+    tokio::task::spawn_blocking(move || -> Result<String> {
+        let mut hasher = blake3::Hasher::new();
+        std::io::copy(&mut std::fs::File::open(&path)?, &mut hasher)?;
+        Ok(hasher.finalize().to_hex().to_string())
+    })
+    .await?
+}
+
+/// Keeps a scene that is arriving as `path`, but only if it turns out to be the file whose hash is
+/// `wanted`. It is written next to its place and hashed as it comes; a file that is not the scene
+/// (changed or damaged on the way), or that did not arrive whole, is deleted.
+async fn store_scene<S, B, E>(mut stream: S, path: &Path, wanted: &str, cancel: &CancellationToken) -> Result<()>
+where
+    S: futures_util::Stream<Item = std::result::Result<B, E>> + Unpin,
+    B: AsRef<[u8]>,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let mut part = path.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
+    let received: Result<String> = async {
+        let mut file = tokio::fs::File::create(&part).await?;
+        let mut hasher = blake3::Hasher::new();
+        while let Some(chunk) = stream.next().await {
+            if cancel.is_cancelled() {
+                bail!("canceled");
+            }
+            let chunk = chunk.context("downloading the scene")?;
+            hasher.update(chunk.as_ref());
+            file.write_all(chunk.as_ref()).await?;
+        }
+        file.flush().await?;
+        Ok(hasher.finalize().to_hex().to_string())
+    }
+    .await;
+    let arrived = match received {
+        Ok(hash) => hash,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&part).await;
+            return Err(e);
+        }
+    };
+    if arrived != wanted {
+        let _ = tokio::fs::remove_file(&part).await;
+        bail!(
+            "the scene that arrived is not the one the job names (its BLAKE3 is {arrived}, not {wanted}): it was changed or damaged on its way from the farm server and was deleted without rendering it"
+        );
+    }
+    tokio::fs::rename(&part, path).await?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -444,4 +513,216 @@ async fn dummy(
         bail!("{failed} frame(s) failed");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    use openfarm_core::model::{OutputSpec, SceneRef, SlotKind};
+
+    use super::*;
+    use crate::TestDir;
+
+    /// A farm server reduced to its scene store: it gives `content` to whoever asks for a scene,
+    /// whatever the scene, and counts how often it was asked.
+    struct Store {
+        content: Mutex<Vec<u8>>,
+        asked: AtomicUsize,
+    }
+
+    impl Store {
+        fn new(content: &[u8]) -> Arc<Store> {
+            Arc::new(Store { content: Mutex::new(content.to_vec()), asked: AtomicUsize::new(0) })
+        }
+
+        fn gives(&self, content: &[u8]) {
+            *self.content.lock().unwrap() = content.to_vec();
+        }
+
+        fn asked(&self) -> usize {
+            self.asked.load(Ordering::SeqCst)
+        }
+
+        /// Starts serving and returns the server's address.
+        async fn serve(self: &Arc<Store>) -> String {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let store = self.clone();
+            let scene = axum::routing::get(move || {
+                let store = store.clone();
+                async move {
+                    store.asked.fetch_add(1, Ordering::SeqCst);
+                    store.content.lock().unwrap().clone()
+                }
+            });
+            let app = axum::Router::new().route("/api/v1/scenes/{hash}", scene);
+            tokio::spawn(async move {
+                let _ = axum::serve(listener, app).await;
+            });
+            url
+        }
+    }
+
+    /// An agent as it is right after OpenFarm starts: nothing checked yet.
+    fn agent(dir: &TestDir, server_url: &str) -> Arc<AgentCtx> {
+        Arc::new(AgentCtx {
+            name: "NODE".into(),
+            data: dir.path().join("agent"),
+            scripts: dir.path().join("agent").join("hosts"),
+            server_url: server_url.into(),
+            identity: Arc::new(crate::auth::Identity::generate().unwrap()),
+            caps: Default::default(),
+            http: reqwest::Client::new(),
+            out: tokio::sync::mpsc::unbounded_channel().0,
+            hosts: Default::default(),
+            downloads: Default::default(),
+            checked_scenes: Default::default(),
+        })
+    }
+
+    /// A task of a job whose scene is `scene`.
+    fn task_for(scene: &[u8]) -> Assignment {
+        let hash = blake3::hash(scene).to_hex().to_string();
+        Assignment {
+            task: 1,
+            job: 1,
+            job_name: "shot".into(),
+            engine: Engine::Cycles,
+            scene_url: format!("/api/v1/scenes/{hash}"),
+            scene: SceneRef { hash, file_name: "shot.blend".into(), original_path: String::new(), size: scene.len() as u64 },
+            frames: vec![1],
+            camera: None,
+            output: OutputSpec { folder: r"\\nas\renders".into(), name: "shot_####".into(), format: "png".into() },
+            device: None,
+            resolution: None,
+            settings: Default::default(),
+            slot: SlotKind::Cpu,
+        }
+    }
+
+    async fn fetch(ctx: &Arc<AgentCtx>, a: &Assignment) -> Result<PathBuf> {
+        let mut rep = Reporter { ctx: ctx.clone(), task: a.task, log: Vec::new(), last_flush: Instant::now() };
+        ensure_scene(ctx, a, &mut rep, &CancellationToken::new()).await
+    }
+
+    /// Where the agent keeps the scene of a task, and how many files are in that folder.
+    fn cache(dir: &TestDir, a: &Assignment) -> (PathBuf, usize) {
+        let path = dir.path().join("agent").join("cache").join("scenes").join(&a.scene.hash).join(&a.scene.file_name);
+        let files = std::fs::read_dir(path.parent().unwrap()).map(|d| d.count()).unwrap_or(0);
+        (path, files)
+    }
+
+    const SCENE: &[u8] = b"the scene, as the artist sent it to the farm";
+
+    #[tokio::test]
+    async fn a_download_is_kept_only_if_it_is_the_scene_the_job_names() {
+        let dir = TestDir::new();
+        let store = Store::new(SCENE);
+        let ctx = agent(&dir, &store.serve().await);
+        let a = task_for(SCENE);
+
+        // Changed on the way, by one letter or cut short: the task fails with the reason, nothing
+        // is kept, and trying again does not make it acceptable.
+        for wrong in [&b"the scene, as somebody changed it on the way"[..], &SCENE[..20], &b""[..]] {
+            store.gives(wrong);
+            for _ in 0..2 {
+                let failed = fetch(&ctx, &a).await.unwrap_err().to_string();
+                assert!(failed.contains("is not the one the job names") && failed.contains("deleted without rendering it"), "{failed}");
+                assert!(failed.contains(&a.scene.hash) && failed.contains(blake3::hash(wrong).to_hex().as_str()), "{failed}");
+                assert_eq!(cache(&dir, &a).1, 0, "something was kept");
+            }
+        }
+        assert_eq!(store.asked(), 6);
+
+        // As it was sent: kept, and handed over.
+        store.gives(SCENE);
+        let path = fetch(&ctx, &a).await.unwrap();
+        assert_eq!((path.clone(), 1), cache(&dir, &a));
+        assert_eq!(std::fs::read(&path).unwrap(), SCENE);
+        // The next task of the job finds it there, already checked: the server is not asked again.
+        assert_eq!(fetch(&ctx, &a).await.unwrap(), path);
+        assert_eq!(store.asked(), 7);
+    }
+
+    #[tokio::test]
+    async fn a_scene_kept_from_before_is_checked_like_a_new_one() {
+        let dir = TestDir::new();
+        let store = Store::new(SCENE);
+        let url = store.serve().await;
+        let a = task_for(SCENE);
+        let (path, _) = cache(&dir, &a);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+
+        // A file an earlier version of OpenFarm stored without looking at it, and it is not the
+        // scene: replaced by the scene, not rendered.
+        std::fs::write(&path, b"what an agent of 0.1.1 was given under this name").unwrap();
+        assert_eq!(fetch(&agent(&dir, &url), &a).await.unwrap(), path);
+        assert_eq!(std::fs::read(&path).unwrap(), SCENE);
+        assert_eq!(store.asked(), 1);
+
+        // OpenFarm starts again. The file is the scene: it is used, and the server is not asked.
+        let restarted = agent(&dir, &url);
+        assert_eq!(fetch(&restarted, &a).await.unwrap(), path);
+        assert_eq!(store.asked(), 1);
+        assert!(restarted.checked_scenes.lock().unwrap().contains(&path));
+
+        // It changed on disk while OpenFarm was not running: found out, and fetched again.
+        std::fs::write(&path, b"changed on disk").unwrap();
+        assert_eq!(fetch(&agent(&dir, &url), &a).await.unwrap(), path);
+        assert_eq!(std::fs::read(&path).unwrap(), SCENE);
+        assert_eq!(store.asked(), 2);
+
+        // A wrong file in the cache and a wrong one from the server: nothing is left to render.
+        std::fs::write(&path, b"changed on disk").unwrap();
+        store.gives(b"changed on the way");
+        assert!(fetch(&agent(&dir, &url), &a).await.is_err());
+        assert_eq!(cache(&dir, &a).1, 0);
+    }
+
+    #[tokio::test]
+    async fn a_job_that_names_no_hash_gets_no_scene() {
+        let dir = TestDir::new();
+        let store = Store::new(SCENE);
+        let ctx = agent(&dir, &store.serve().await);
+        let (capitals, not_hex, almost) = ("A".repeat(64), "g".repeat(64), format!("{}/", "0".repeat(63)));
+        for hash in ["", "abc", r"..\..\..\Windows\System32", capitals.as_str(), not_hex.as_str(), almost.as_str()] {
+            let mut a = task_for(SCENE);
+            a.scene.hash = hash.to_string();
+            let failed = fetch(&ctx, &a).await.unwrap_err().to_string();
+            assert!(failed.contains("BLAKE3"), "{failed}");
+        }
+        // Nothing was asked of the server and nothing was written anywhere.
+        assert_eq!(store.asked(), 0);
+        assert!(!dir.path().join("agent").exists());
+        assert!(is_blake3(&task_for(SCENE).scene.hash));
+    }
+
+    #[tokio::test]
+    async fn a_download_that_does_not_arrive_whole_leaves_nothing() {
+        let dir = TestDir::new();
+        let path = dir.path().join("shot.blend");
+        let wanted = blake3::hash(SCENE).to_hex().to_string();
+        let files = || std::fs::read_dir(dir.path()).unwrap().count();
+        let chunks = |parts: Vec<std::io::Result<Vec<u8>>>| futures_util::stream::iter(parts);
+        let go = CancellationToken::new();
+
+        // The connection breaks half way.
+        let broken = chunks(vec![Ok(SCENE[..10].to_vec()), Err(std::io::Error::other("connection reset"))]);
+        assert!(store_scene(broken, &path, &wanted, &go).await.is_err());
+        assert_eq!(files(), 0);
+        // The task is canceled meanwhile.
+        let canceled = CancellationToken::new();
+        canceled.cancel();
+        let failed = store_scene(chunks(vec![Ok(SCENE.to_vec())]), &path, &wanted, &canceled).await.unwrap_err();
+        assert_eq!(failed.to_string(), "canceled");
+        assert_eq!(files(), 0);
+        // In pieces and whole: kept under its name, and nothing else next to it.
+        let whole = chunks(vec![Ok(SCENE[..10].to_vec()), Ok(SCENE[10..].to_vec())]);
+        store_scene(whole, &path, &wanted, &go).await.unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), SCENE);
+        assert_eq!(files(), 1);
+        assert_eq!(hash_of(path).await.unwrap(), wanted);
+    }
 }

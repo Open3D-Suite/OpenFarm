@@ -64,6 +64,9 @@ pub struct AgentCtx {
     /// Warm hosts by slot ("cpu", "gpu0", …).
     pub hosts: tokio::sync::Mutex<HashMap<String, HostProc>>,
     pub downloads: tokio::sync::Mutex<()>,
+    /// The scenes in the cache whose content was checked against their hash since OpenFarm
+    /// started. A file that is only "there" is not trusted (see `runner::ensure_scene`).
+    pub checked_scenes: Mutex<std::collections::HashSet<PathBuf>>,
 }
 
 pub type SharedStatus = Arc<Mutex<AgentStatus>>;
@@ -98,6 +101,7 @@ pub async fn run(cfg: Config, data: PathBuf, status: SharedStatus, identity: Arc
         out: out_tx,
         hosts: Default::default(),
         downloads: Default::default(),
+        checked_scenes: Default::default(),
     });
     let mut running: HashMap<u64, (CancellationToken, String)> = HashMap::new();
     let gpu_count = caps.gpus.len() as u32;

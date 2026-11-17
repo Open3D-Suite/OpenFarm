@@ -35,6 +35,10 @@ machines again on the farm's computer (*Machines*).
   *Approve* can no longer approve the newcomer in its place. A machine that really lost its key joins
   again once it is forgotten in *Machines*.
 
+- **Machines check the scenes they download.** Before opening a scene, a machine makes sure that what
+  it downloaded, or kept from an earlier job, is exactly the scene its job names. A scene that was
+  changed or damaged on the way is deleted and the task fails saying so, instead of rendering it.
+
 The traffic between machines is still not encrypted: see *Security* in the README.
 
 ## 0.1.1 — 16 November 2026

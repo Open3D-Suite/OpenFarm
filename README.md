@@ -137,8 +137,10 @@ OpenFarm is made for a local network you trust. What it protects, and what it do
   `localhost`, is refused before OpenFarm does anything with it.
 - **Not protected: the traffic itself.** Nothing is encrypted. Scenes, previews, logs and commands
   travel in clear, so anybody on the network can read them, and somebody able to change traffic on its
-  way can still tamper with what is not signed (the farm's answers, the scenes the machines download,
-  the messages of a machine once it is connected). Use OpenFarm only on a local network you trust:
+  way can still tamper with what is not signed (the farm's answers, the messages of a machine once it
+  is connected). Scenes are checked all the same: a machine compares the scene it downloaded with the
+  fingerprint its job names and refuses to render one that was changed. Use OpenFarm only on a local
+  network you trust:
   **do not expose it to the internet and do not forward its ports on the router.**
 - **Not protected: a computer of the farm from its own programs.** Any program running on a computer of
   the farm can use the farm as that computer does.
