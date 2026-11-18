@@ -23,9 +23,8 @@ as a change that makes it old.
 - Checks, all of which must pass:
   - `cargo fmt --all --check`
   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-  - `cargo test --workspace --locked` (77 tests; without `--workspace` the 18 of `crates/core` do not run)
+  - `cargo test --workspace --locked` (81 tests; without `--workspace` the 18 of `crates/core` do not run)
   - `ruff format --check .` and `ruff check .`, for the Python files
-- Clippy fails today: `main` is over the `cognitive_complexity` limit of 30.
 - `.editorconfig`, `.gitattributes`, `rustfmt.toml`, `clippy.toml` and `ruff.toml` are the same in every
   Open3D repo. Do not change them here.
 
