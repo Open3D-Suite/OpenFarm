@@ -610,7 +610,7 @@ mod tests {
             version: VERSION.into(),
             caps: Default::default(),
             rank: 1,
-            address: "192.168.2.20".into(),
+            address: "192.168.1.20".into(),
             loopback: false,
         }
     }
@@ -827,7 +827,7 @@ mod tests {
         let refused = farm.hello(hello("a", "IMPOSTOR", &impostor), 7, mpsc::unbounded_channel().0).unwrap_err();
         assert!(refused.contains("another key") && refused.contains("forget the machine in Machines"), "{refused}");
         assert_eq!(seen(&farm, "a"), before);
-        assert_eq!(before, ("A".to_string(), Some(a.fingerprint()), true, 1, true, "192.168.2.20".to_string(), VERSION.to_string()));
+        assert_eq!(before, ("A".to_string(), Some(a.fingerprint()), true, 1, true, "192.168.1.20".to_string(), VERSION.to_string()));
         assert!(farm.trusts_fingerprint(&a.fingerprint()) && !farm.trusts_fingerprint(&impostor.fingerprint()));
         // The owner pressing Approve after that approves nothing new.
         farm.machine_action("a", "approve").unwrap();
@@ -995,7 +995,7 @@ mod tests {
             &[host, ("Sec-Fetch-Site", "cross-site")],
             &[host, ("Sec-Fetch-Site", "same-site")],
             &[("Host", rebound.as_str()), ("Sec-Fetch-Site", "same-origin")],
-            &[("Host", "192.168.2.10:47100")],
+            &[("Host", "192.168.1.10:47100")],
         ];
         for page in pages {
             for (request, body) in [
@@ -1162,7 +1162,7 @@ mod tests {
             let addr: SocketAddr = from.parse().unwrap();
             api_scene_from_path(State(state.clone()), ConnectInfo(addr), Json(FromPath { path: path.to_string_lossy().into_owned() }))
         };
-        let network = "192.168.2.20:50000";
+        let network = "192.168.1.20:50000";
 
         // No folder in the settings: the network gets nothing, this computer everything, as before.
         let state = ServerState::new(&Config::new(), &root.join("farm")).unwrap();

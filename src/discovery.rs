@@ -56,9 +56,9 @@ mod tests {
 
     #[test]
     fn reads_an_answer() {
-        let from: SocketAddr = "192.168.2.10:47101".parse().unwrap();
+        let from: SocketAddr = "192.168.1.10:47101".parse().unwrap();
         let f = parse_answer(br#"{"openfarm":"0.1.0","name":"Studio","port":47100}"#, from).unwrap();
-        assert_eq!(f.address, "192.168.2.10:47100");
+        assert_eq!(f.address, "192.168.1.10:47100");
         assert_eq!(f.name, "Studio");
         assert!(parse_answer(b"nonsense", from).is_none());
     }

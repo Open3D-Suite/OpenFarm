@@ -40,7 +40,7 @@ pub struct Config {
     pub role: Role,
     #[serde(default = "default_kind")]
     pub kind: MachineKind,
-    /// The farm server's address (`192.168.2.10` or `192.168.2.10:47100`) for an agent.
+    /// The farm server's address (`192.168.1.10` or `192.168.1.10:47100`) for an agent.
     #[serde(default)]
     pub server: String,
     /// The server renders too.
@@ -223,8 +223,8 @@ mod tests {
     fn server_urls() {
         let mut c = Config::new();
         c.role = Role::Agent;
-        c.server = "192.168.2.10".into();
-        assert_eq!(c.server_url(), "http://192.168.2.10:47100");
+        c.server = "192.168.1.10".into();
+        assert_eq!(c.server_url(), "http://192.168.1.10:47100");
         c.server = "http://farm:5000/".into();
         assert_eq!(c.server_url(), "http://farm:5000");
         c.role = Role::Server;
@@ -261,7 +261,7 @@ mod tests {
             r#"{{
   "role": "agent",
   "kind": "node",
-  "server": "192.168.2.10",
+  "server": "192.168.1.10",
   "render": true,
   "name": "NODE-07",
   "machine_id": "0b6c2a54-6f0e-4c0e-9a51-0d4d0f4b7a11",
@@ -278,7 +278,7 @@ mod tests {
         let cfg = Config::load_or_create(dir.path()).unwrap();
         // Everything else is kept…
         assert_eq!((cfg.role, cfg.kind), (Role::Agent, MachineKind::Node));
-        assert_eq!((cfg.server.as_str(), cfg.name.as_str()), ("192.168.2.10", "NODE-07"));
+        assert_eq!((cfg.server.as_str(), cfg.name.as_str()), ("192.168.1.10", "NODE-07"));
         assert_eq!(cfg.machine_id, "0b6c2a54-6f0e-4c0e-9a51-0d4d0f4b7a11");
         assert_eq!(cfg.max_batch_path.as_deref(), Some(r"D:\Max\3dsmaxbatch.exe"));
         // …the machine has a key pair now, and the old secret is gone from the file.
