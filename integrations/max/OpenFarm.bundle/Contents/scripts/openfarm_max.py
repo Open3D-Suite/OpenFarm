@@ -64,6 +64,20 @@ def default_output():
     return folder, os.path.splitext(str(rt.maxFileName) or "frame")[0] + "_####", "exr"
 
 
+def save_copy(path):
+    """Saves a copy of the scene as it is now and tells whether 3ds Max could.
+
+    The open scene keeps its file name and its unsaved changes mark. 3ds Max 2027 clears the mark although
+    it is asked to keep it, so the mark is put back as it was.
+    """
+    changed = rt.getSaveRequired()
+    try:
+        return bool(rt.saveMaxFile(path, clearNeedSaveFlag=False, useNewFile=False, quiet=True))
+    finally:
+        if rt.getSaveRequired() != changed:
+            rt.setSaveRequired(changed)
+
+
 def call(path, body=None, data=None, headers=None):
     if body is not None:
         data = json.dumps(body).encode()
@@ -214,8 +228,7 @@ class Window(QtWidgets.QWidget):
         file_name = str(rt.maxFileName) or "untitled.max"
         snapshot = os.path.join(tempfile.gettempdir(), "OpenFarm", uuid.uuid4().hex, file_name)
         os.makedirs(os.path.dirname(snapshot), exist_ok=True)
-        # A copy of the scene as it is now; the open file keeps its name and unsaved-changes state.
-        if not rt.saveMaxFile(snapshot, clearNeedSaveFlag=False, useNewFile=False, quiet=True):
+        if not save_copy(snapshot):
             return self.say("3ds Max could not save a copy of the scene.", False)
         spec = {
             "name": self.name.text().strip() or file_name,

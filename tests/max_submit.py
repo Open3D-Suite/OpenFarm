@@ -28,7 +28,7 @@ print("OUTPUT", ofm.default_output())
 dirty_before = rt.getSaveRequired()
 snapshot = os.path.join(tempfile.gettempdir(), "OpenFarm", uuid.uuid4().hex, str(rt.maxFileName))
 os.makedirs(os.path.dirname(snapshot), exist_ok=True)
-ok = rt.saveMaxFile(snapshot, clearNeedSaveFlag=False, useNewFile=False, quiet=True)
+ok = ofm.save_copy(snapshot)
 print(
     "SNAPSHOT",
     ok,

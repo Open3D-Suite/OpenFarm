@@ -47,8 +47,12 @@ machines again on the farm's computer (*Machines*).
   error ("SyntaxError") and no window. It also works when the Windows user's folder has spaces, accents
   or an apostrophe in its name.
 
-To get this fix, install the button again (*This machine > Install the 3ds Max button*) and restart
-3ds Max.
+- **3ds Max still knows a scene has unsaved changes after sending it.** Sending a scene made 3ds Max
+  2027 forget that the scene had changes to save, so it could be closed without the question to save
+  them. The scene now stays as it was: changed if it was changed, and with its own file name.
+
+To get these two fixes, install the button again (*This machine > Install the 3ds Max button*) and
+restart 3ds Max.
 
 The traffic between machines is still not encrypted: see *Security* in the README.
 
