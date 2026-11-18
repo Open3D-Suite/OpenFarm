@@ -14,6 +14,8 @@ macroScript OpenFarmSubmit
         if (not (isKindOf openfarm_home String) or not (doesFileExist (openfarm_home + "openfarm_max.py"))) then
             messageBox "OpenFarm's 3ds Max button is not installed properly. Install it again from OpenFarm > This machine." title:"OpenFarm"
         else
-            python.Execute ("import sys\nd = r'" + openfarm_home + "'\nif d not in sys.path: sys.path.insert(0, d)\nimport openfarm_max\nopenfarm_max.show()")
+            -- One fixed text: Python reads the folder by itself. Written into the text, a folder breaks it
+            -- (it ends in a backslash and may hold a quote).
+            python.Execute "import os\nimport sys\nimport pymxs\nd = os.path.normpath(pymxs.runtime.openfarm_home)\nif d not in sys.path: sys.path.insert(0, d)\nimport openfarm_max\nopenfarm_max.show()"
     )
 )

@@ -43,6 +43,13 @@ machines again on the farm's computer (*Machines*).
   something changes on the farm. Since the first version it asked again at once, about a thousand times
   a second for as long as it was open. It waits now.
 
+- **The "Send to OpenFarm" button of 3ds Max opens its window.** Until now, pressing it showed a script
+  error ("SyntaxError") and no window. It also works when the Windows user's folder has spaces, accents
+  or an apostrophe in its name.
+
+To get this fix, install the button again (*This machine > Install the 3ds Max button*) and restart
+3ds Max.
+
 The traffic between machines is still not encrypted: see *Security* in the README.
 
 ## 0.1.1 — 16 November 2026

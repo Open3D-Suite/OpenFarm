@@ -66,3 +66,55 @@ pub fn install_blender(cfg: &Config) -> Result<String> {
     }
     Ok(dir.to_string_lossy().into_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MAX_FILES;
+
+    /// What a MAXScript text in quotes says, when `code` is one such text and nothing more.
+    fn fixed_text(code: &str) -> Option<String> {
+        let mut chars = code.strip_prefix('"')?.chars();
+        let mut text = String::new();
+        loop {
+            match chars.next()? {
+                '"' => break,
+                '\\' => text.push(match chars.next()? {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    other => other,
+                }),
+                c => text.push(c),
+            }
+        }
+        chars.as_str().trim().is_empty().then_some(text)
+    }
+
+    /// The Python text given to each `python.Execute` of a MAXScript file, or the code found in its
+    /// place when that is not one fixed text.
+    fn python_texts(mxs: &str) -> Vec<Result<String, String>> {
+        let code = mxs.lines().map(str::trim).filter(|line| !line.starts_with("--"));
+        code.filter_map(|line| {
+            let at = line.to_ascii_lowercase().find("python.execute")?;
+            let given = line[at + "python.execute".len()..].trim();
+            Some(fixed_text(given).ok_or_else(|| given.to_string()))
+        })
+        .collect()
+    }
+
+    /// The button once wrote its folder into the Python text it runs, between quotes: a folder ends in
+    /// a backslash, and may hold a quote, so Python could not read the text and the window never opened.
+    #[test]
+    fn the_max_button_runs_one_fixed_python_text() {
+        let scripts = MAX_FILES.iter().filter(|(name, _)| name.ends_with(".mcr") || name.ends_with(".ms"));
+        let texts: Vec<_> = scripts.flat_map(|(_, mxs)| python_texts(mxs)).collect();
+        assert_eq!(texts.len(), 1, "the button starts Python in one place: {texts:?}");
+        let python = match &texts[0] {
+            Ok(fixed) => fixed,
+            Err(built) => panic!("python.Execute must get one fixed text, not one put together when it runs: {built}"),
+        };
+        // With no quote and no backslash, the text has no string of its own that could be left open.
+        assert!(!python.contains(['\'', '"', '\\']), "{python}");
+        assert!(python.contains("pymxs.runtime.openfarm_home"), "Python reads the folder of the bundle by itself: {python}");
+    }
+}

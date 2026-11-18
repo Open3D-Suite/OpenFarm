@@ -15,7 +15,8 @@ as a change that makes it old.
   relays `/api/v1` to the server. `src/config.rs`: `config.json` and the ports (server 47100, local 47102).
 - `ui/` (plain HTML, JavaScript and CSS, no build step; English and Spanish texts in `ui/app.js`),
   `hosts/*.py` (run inside 3ds Max and Blender) and `integrations/` (the submitters) are built into the exe.
-- `tools/package.py`: the packager. `tests/*.py`: checks against a running farm, outside `cargo test`.
+- `tools/package.py`: the packager. `tests/*.py`: checks outside `cargo test`, against a running farm;
+  `tests/max_button.py` needs no farm, only a 3ds Max batch session.
 
 ## Build and check
 
@@ -23,7 +24,7 @@ as a change that makes it old.
 - Checks, all of which must pass:
   - `cargo fmt --all --check`
   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-  - `cargo test --workspace --locked` (81 tests; without `--workspace` the 18 of `crates/core` do not run)
+  - `cargo test --workspace --locked` (82 tests; without `--workspace` the 18 of `crates/core` do not run)
   - `ruff format --check .` and `ruff check .`, for the Python files
 - `.editorconfig`, `.gitattributes`, `rustfmt.toml`, `clippy.toml` and `ruff.toml` are the same in every
   Open3D repo. Do not change them here.
