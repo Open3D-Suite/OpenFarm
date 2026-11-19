@@ -15,9 +15,8 @@ as a change that makes it old.
   relays `/api/v1` to the server. `src/config.rs`: `config.json` and the ports (server 47100, local 47102).
 - `ui/` (plain HTML, JavaScript and CSS, no build step; English and Spanish texts in `ui/app.js`),
   `hosts/*.py` (run inside 3ds Max and Blender) and `integrations/` (the submitters) are built into the exe.
-- `tools/package.py`: the packager from before the common one, which now does its work; it stays until it
-  is deleted. `tests/*.py`: checks outside `cargo test`, against a running farm; `tests/max_button.py`
-  needs no farm, only a 3ds Max batch session.
+- `tests/*.py`: checks outside `cargo test`, against a running farm; `tests/max_button.py` needs no
+  farm, only a 3ds Max batch session.
 
 ## Build and check
 
