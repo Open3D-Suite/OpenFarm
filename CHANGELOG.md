@@ -43,6 +43,9 @@ machines again on the farm's computer (*Machines*).
   something changes on the farm. Since the first version it asked again at once, about a thousand times
   a second for as long as it was open. It waits now.
 
+- **The 3ds Max button and the Blender add-on carry OpenFarm's version.** They said 0.1.0 whatever
+  version of OpenFarm installed them; now they say the version of the OpenFarm that installs them.
+
 - **The "Send to OpenFarm" button of 3ds Max opens its window.** Until now, pressing it showed a script
   error ("SyntaxError") and no window. It also works when the Windows user's folder has spaces, accents
   or an apostrophe in its name.

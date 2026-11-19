@@ -31,8 +31,9 @@ as a change that makes it old.
 
 ## Version and release
 
-- The app's version is in the root `Cargo.toml` and nowhere else by hand, except the `**Version X.Y.Z**`
-  line of the README and the CHANGELOG. The packager stops if that line or a CHANGELOG section is missing.
+- The version is in the root `Cargo.toml` and repeated in `Cargo.lock`, `crates/core/Cargo.toml`, the
+  bundle's `PackageContents.xml`, `blender_manifest.toml` and the README's `**Version X.Y.Z**` line. The
+  packager stops if that line or a CHANGELOG section is missing.
 - Changes a user can notice go into `CHANGELOG.md` under `## In development`, in the same commit.
 - `python -I tools/package.py` checks the licences of the dependencies, runs the tests, builds, and writes
   `dist/openfarm-<version>-windows-x64.zip` and `dist/SHA256SUMS.txt`. It refuses an exe that still holds a

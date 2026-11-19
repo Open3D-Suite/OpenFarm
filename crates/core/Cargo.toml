@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [package]
 name = "openfarm-core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "OpenFarm's pure core: jobs, frames, the agent protocol and the scheduler (no IO)"
 license = "GPL-3.0-or-later"
