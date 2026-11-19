@@ -15,8 +15,9 @@ as a change that makes it old.
   relays `/api/v1` to the server. `src/config.rs`: `config.json` and the ports (server 47100, local 47102).
 - `ui/` (plain HTML, JavaScript and CSS, no build step; English and Spanish texts in `ui/app.js`),
   `hosts/*.py` (run inside 3ds Max and Blender) and `integrations/` (the submitters) are built into the exe.
-- `tools/package.py`: the packager. `tests/*.py`: checks outside `cargo test`, against a running farm;
-  `tests/max_button.py` needs no farm, only a 3ds Max batch session.
+- `tools/package.py`: the packager from before the common one, which now does its work; it stays until it
+  is deleted. `tests/*.py`: checks outside `cargo test`, against a running farm; `tests/max_button.py`
+  needs no farm, only a 3ds Max batch session.
 
 ## Build and check
 
@@ -30,17 +31,26 @@ as a change that makes it old.
   - `cargo test --workspace --locked` (82 tests; without `--workspace` the 18 of `crates/core` do not run)
   - only with `-Full`: `tests/max_button.py` in `3dsmaxbatch`; the other `tests/*.py` are left out
 - `.editorconfig`, `.gitattributes`, `rustfmt.toml`, `clippy.toml`, `ruff.toml`, `LICENSE`,
-  `tools/check.ps1` and `tools/repo.py` are the same in every Open3D repo. Do not change them here.
+  `tools/check.ps1`, `tools/repo.py`, `tools/repo_package.py` and `tools/repo_release.py` are the same in
+  every Open3D repo. Do not change them here.
 
 ## Version and release
 
 - The version is in the root `Cargo.toml`; `python -I tools/repo.py version set X.Y.Z` also writes it in
   `Cargo.lock`, `crates/core/Cargo.toml`, the bundle's `PackageContents.xml`, `blender_manifest.toml` and
-  the README's `**Version X.Y.Z**` line. The packager stops if that line or a CHANGELOG section is missing.
+  the README's `**Version X.Y.Z**` line; `tools\check.ps1` fails if they disagree.
 - Changes a user can notice go into `CHANGELOG.md` under `## In development`, in the same commit.
-- `python -I tools/package.py` checks the licences of the dependencies, runs the tests, builds, and writes
-  `dist/openfarm-<version>-windows-x64.zip` and `dist/SHA256SUMS.txt`. It refuses an exe that still holds a
-  path of the computer that built it; its own flags keep them out (`/d1trimfile` for the bundled C code).
+- `python -I tools/repo.py package` makes the release package as the `[package]` table of
+  `tools/repo.toml` says: the version and its `## X.Y.Z` section in the CHANGELOG, the quick checks (the
+  tests among them), `cargo build --release --locked` without this computer's folders in the exe
+  (`/d1trimfile` for the bundled C code), the licences of the dependencies in `THIRD-PARTY-LICENSES.txt`,
+  then `dist/openfarm-<version>-windows-x64.zip` (`OpenFarm.exe`, README, LICENSE, CHANGELOG) and
+  `dist/SHA256SUMS.txt`. It refuses an exe that holds a path of the computer that built it, or whose file
+  version or `--version` is not the version.
+- `python -I tools/repo.py release X.Y.Z` turns `## In development` into `## X.Y.Z — <date>`, sets the
+  version, commits `Release X.Y.Z`, packages, tags `vX.Y.Z` and prints the pushes to approve; run again
+  once they are done, it makes the GitHub release as a draft. It never pushes. `--dry-run` tries it all
+  and writes only to `dist/`.
 - The Open3D launcher needs `OpenFarm.exe` at the root of the zip, its file version that of the release.
 
 ## Rules of this code

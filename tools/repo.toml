@@ -1,5 +1,6 @@
 # What the common OPEN3D tools need to know about this repository. tools/repo.py reads it:
-# tools/check.ps1 runs the checks, and "python -I tools/repo.py version set X.Y.Z" writes a new version.
+# tools/check.ps1 runs the checks, "python -I tools/repo.py version set X.Y.Z" writes a new version,
+# "python -I tools/repo.py package" makes the release package and "release X.Y.Z" the release.
 
 # Where the version lives (`source`) and the other places that repeat it. Each one is a file and a
 # pattern whose one group is the version; "^" is the start of a line. The core crate, the 3ds Max
@@ -46,3 +47,20 @@ run = ["cargo", "test", "--workspace", "--locked"]
 name = "3ds Max button"
 run = ["3dsmaxbatch", "tests/max_button.py", "-mxsString", "bundle:integrations/max/OpenFarm.bundle"]
 full = true
+
+# The release package: dist/openfarm-<version>-windows-x64.zip, with OpenFarm.exe at its root, and
+# dist/SHA256SUMS.txt. The launcher installs it from there. The tests run among the quick checks, before
+# the build; the packager also trims this computer's folders from the bundled C code (aws-lc).
+[package]
+name = "OpenFarm"
+build = [["cargo", "build", "--release", "--locked"]]
+# THIRD-PARTY-LICENSES.txt: every library cargo links in, with its licence checked and its texts.
+third_party = "cargo"
+files = [
+    { from = "{cargo_target}/release/OpenFarm.exe", to = "OpenFarm.exe" },
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+]
+exe = "OpenFarm.exe"
+version_answer = "OpenFarm {version}"
