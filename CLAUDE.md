@@ -21,19 +21,22 @@ as a change that makes it old.
 ## Build and check
 
 - Build: `cargo build --release --locked`.
-- Checks, all of which must pass:
-  - `cargo fmt --all --check`
+- Checks: `tools\check.ps1` runs them all, and all must pass. It needs Python 3.11 or newer and the
+  ruff that `ruff.toml` names. First the steps built into `tools/repo.py`: the version in every place,
+  the licence line of every source (`ui/` too), the common lints, no path of somebody's computer. Then
+  what `tools/repo.toml` lists:
+  - `cargo fmt --all --check`, `ruff format --check .` and `ruff check .`
   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
   - `cargo test --workspace --locked` (82 tests; without `--workspace` the 18 of `crates/core` do not run)
-  - `ruff format --check .` and `ruff check .`, for the Python files
-- `.editorconfig`, `.gitattributes`, `rustfmt.toml`, `clippy.toml` and `ruff.toml` are the same in every
-  Open3D repo. Do not change them here.
+  - only with `-Full`: `tests/max_button.py` in `3dsmaxbatch`; the other `tests/*.py` are left out
+- `.editorconfig`, `.gitattributes`, `rustfmt.toml`, `clippy.toml`, `ruff.toml`, `LICENSE`,
+  `tools/check.ps1` and `tools/repo.py` are the same in every Open3D repo. Do not change them here.
 
 ## Version and release
 
-- The version is in the root `Cargo.toml` and repeated in `Cargo.lock`, `crates/core/Cargo.toml`, the
-  bundle's `PackageContents.xml`, `blender_manifest.toml` and the README's `**Version X.Y.Z**` line. The
-  packager stops if that line or a CHANGELOG section is missing.
+- The version is in the root `Cargo.toml`; `python -I tools/repo.py version set X.Y.Z` also writes it in
+  `Cargo.lock`, `crates/core/Cargo.toml`, the bundle's `PackageContents.xml`, `blender_manifest.toml` and
+  the README's `**Version X.Y.Z**` line. The packager stops if that line or a CHANGELOG section is missing.
 - Changes a user can notice go into `CHANGELOG.md` under `## In development`, in the same commit.
 - `python -I tools/package.py` checks the licences of the dependencies, runs the tests, builds, and writes
   `dist/openfarm-<version>-windows-x64.zip` and `dist/SHA256SUMS.txt`. It refuses an exe that still holds a

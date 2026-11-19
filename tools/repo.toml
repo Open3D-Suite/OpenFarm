@@ -1,0 +1,48 @@
+# What the common OPEN3D tools need to know about this repository. tools/repo.py reads it:
+# tools/check.ps1 runs the checks, and "python -I tools/repo.py version set X.Y.Z" writes a new version.
+
+# Where the version lives (`source`) and the other places that repeat it. Each one is a file and a
+# pattern whose one group is the version; "^" is the start of a line. The core crate, the 3ds Max
+# bundle and the Blender add-on carry the app's version. PROTOCOL in crates/core is not a version.
+[version]
+source = { file = "Cargo.toml", pattern = '^version = "([^"]+)"' }
+places = [
+    { file = "Cargo.lock", pattern = '^name = "openfarm"\nversion = "([^"]+)"' },
+    { file = "crates/core/Cargo.toml", pattern = '^version = "([^"]+)"' },
+    { file = "Cargo.lock", pattern = '^name = "openfarm-core"\nversion = "([^"]+)"' },
+    { file = "integrations/max/OpenFarm.bundle/PackageContents.xml", pattern = '^\s+AppVersion="([^"]+)"' },
+    { file = "integrations/max/OpenFarm.bundle/PackageContents.xml", pattern = '<ComponentEntry AppName="OpenFarm" Version="([^"]+)"' },
+    { file = "integrations/blender/openfarm/blender_manifest.toml", pattern = '^version = "([^"]+)"' },
+    { file = "README.md", pattern = '^\*\*Version ([^*]+)\*\*' },
+]
+# Run after a new version is written: cargo looks Cargo.lock over, without touching the libraries.
+after_set = [["cargo", "update", "--workspace", "--offline"]]
+
+# The checks, in the order they run, the quick ones first. `full = true` marks one that only
+# tools/check.ps1 -Full runs. tests/e2e.py, tests/blender_submit.py and tests/max_submit.py are not
+# here: they need a farm that is already running.
+[[check]]
+name = "cargo fmt"
+run = ["cargo", "fmt", "--all", "--check"]
+
+[[check]]
+name = "ruff format"
+run = ["ruff", "format", "--check", "."]
+
+[[check]]
+name = "ruff check"
+run = ["ruff", "check", "."]
+
+[[check]]
+name = "cargo clippy"
+run = ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"]
+
+[[check]]
+name = "cargo test"
+run = ["cargo", "test", "--workspace", "--locked"]
+
+# The 3ds Max button in a 3ds Max batch session; it needs no farm and sends nothing.
+[[check]]
+name = "3ds Max button"
+run = ["3dsmaxbatch", "tests/max_button.py", "-mxsString", "bundle:integrations/max/OpenFarm.bundle"]
+full = true

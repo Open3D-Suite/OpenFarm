@@ -154,10 +154,11 @@ and delete `%LOCALAPPDATA%\OpenFarm`,
 
 ## Building
 
-Rust (stable) on Windows: `cargo test --workspace`, `cargo build --release`.
-`python -I tools/package.py` builds, tests and writes `dist/openfarm-<version>-windows-x64.zip` with
-`SHA256SUMS.txt`. `tests/e2e.py` sends a job to a running farm and checks the result (the test
-renderer needs no 3D software).
+Rust (stable) and Python 3.11 or newer on Windows: `cargo build --release`. `tools\check.ps1` runs
+every check (format, lints and tests); `tools\check.ps1 -Full` also tries the 3ds Max button in a
+3ds Max batch session. `python -I tools/package.py` builds, tests and writes
+`dist/openfarm-<version>-windows-x64.zip` with `SHA256SUMS.txt`. `tests/e2e.py` sends a job to a
+running farm and checks the result (the test renderer needs no 3D software).
 
 ## License
 
