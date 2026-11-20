@@ -13,8 +13,9 @@ as a change that makes it old.
 - `src/agent/`: `runner.rs` runs a task; `hosts.rs` keeps 3ds Max or Blender open between tasks.
 - `src/local.rs`: the local app on 127.0.0.1 for the window (`src/window.rs`) and the submitters; it
   relays `/api/v1` to the server. `src/config.rs`: `config.json` and the ports (server 47100, local 47102).
-- `src/open3d_settings.rs`: the language every Open3D app shares, with the cases its tests read
-  (`src/open3d_settings_cases.txt`).
+- `src/folders.rs`: where OpenFarm keeps its files, and carrying its old folder over at start.
+- `src/open3d_settings.rs`: what every Open3D app shares, the language and the folders of each app, with
+  the cases its tests read (`src/open3d_settings_cases.txt`).
 - `ui/` (plain HTML, JavaScript and CSS, no build step; English and Spanish texts in `ui/app.js`),
   `hosts/*.py` (run inside 3ds Max and Blender) and `integrations/` (the submitters) are built into the exe.
 - `tests/*.py`: checks outside `cargo test`, against a running farm; `tests/max_button.py` needs no
@@ -29,7 +30,7 @@ as a change that makes it old.
   what `tools/repo.toml` lists:
   - `cargo fmt --all --check`, `ruff format --check .` and `ruff check .`
   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-  - `cargo test --workspace --locked` (92 tests; without `--workspace` the 18 of `crates/core` do not run)
+  - `cargo test --workspace --locked` (109 tests; without `--workspace` the 18 of `crates/core` do not run)
   - only with `-Full`: `tests/max_button.py` in `3dsmaxbatch`; the other `tests/*.py` are left out
 - CI: `.github/workflows/check.yml` runs `tools\check.ps1`, without `-Full`, on every push and pull request
   to `main`, on GitHub's Windows runner with Python 3.14.
@@ -73,6 +74,18 @@ as a change that makes it old.
   gets it from `/local/info`; its Language choice (*This machine*, and the first-run page) writes the file
   through `POST /local/language` and changes at once. OpenFarm kept no language before, so nothing is
   carried over. A page the farm server gives another computer's browser follows that browser.
+- Its files, from `src/folders.rs`: `config.json` in `%APPDATA%\Open3D\OpenFarm`; the log, `webview`,
+  `server` (the farm's database, scenes, previews, task logs) and `agent` in `%LOCALAPPDATA%\Open3D\OpenFarm`;
+  `OPEN3D_SETTINGS_DIR` and `OPEN3D_DATA_DIR` move them. `--data` keeps everything in its one folder and
+  copies nothing. `main` first takes the local port, read from the `config.json` it will use: a second
+  start hands over to the first and copies nothing. Then, before the log, the settings or the database
+  open, it copies from the old `%LOCALAPPDATA%\OpenFarm` (`%TEMP%\OpenFarm` without `LOCALAPPDATA`), once
+  and leaving it as it was: `config.json` (by the rules of `carry_over`, which copies only whole folders)
+  and `server` with `open3d_settings::carry_over`, holding `farm.sqlite` so that nothing writes it meanwhile,
+  and not at all while a program has it open to write. The log, `webview` and `agent` are made again. A
+  failed copy leaves that run on the old folder for what was not copied, and the next start tries again;
+  the log says why and `/local/info` gives it to the page (`not_copied`). Only debug builds read
+  `OPENFARM_TEST_OLD_FOLDER`, a folder that stands for the old one in a test.
 - `unsafe` is denied. It is allowed by name, with its reason, only where Windows is called: the `dpapi`
   and `agent::jobobj` modules, one function of `src/window.rs` and `user_interface_language` in
   `src/open3d_settings.rs`.

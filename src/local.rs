@@ -29,7 +29,11 @@ use crate::open3d_settings::{self, Language};
 #[derive(Clone)]
 pub struct LocalState {
     pub cfg: Arc<Mutex<Config>>,
-    pub data: PathBuf,
+    /// The folder of `config.json`.
+    pub settings: PathBuf,
+    /// What of an earlier OpenFarm's folder could not be copied when this one started
+    /// (`crate::folders`); the page tells the person.
+    pub not_copied: Arc<Vec<String>>,
     pub agent: SharedStatus,
     /// This machine's key pair: it signs what is relayed to the farm server.
     pub identity: Arc<Identity>,
@@ -125,6 +129,7 @@ async fn info(State(s): State<LocalState>) -> Json<serde_json::Value> {
         "agent": agent,
         "renders": cfg.role == Role::Agent || (cfg.role == Role::Server && cfg.render),
         "language": s.language.shown().code(),
+        "not_copied": *s.not_copied,
     }))
 }
 
@@ -166,7 +171,7 @@ async fn setup(State(s): State<LocalState>, Json(p): Json<Setup>) -> Result<Json
         if let Some(v) = p.farm_name.filter(|n| !n.trim().is_empty()) {
             cfg.farm_name = v.trim().to_string();
         }
-        cfg.save(&s.data).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        cfg.save(&s.settings).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
     let _ = s.control.send(Control::Restart);
     Ok(Json(json!({ "ok": true })))
@@ -352,12 +357,18 @@ mod tests {
     /// A local app on a port of its own, and what it asks the window to do. It reads the shared
     /// language from [`shared_dir`] as it starts.
     async fn local_app(dir: &TestDir) -> (u16, tokio::sync::mpsc::UnboundedReceiver<Control>) {
+        local_app_with(dir, Vec::new()).await
+    }
+
+    /// [`local_app`], started after an earlier OpenFarm's folder could not all be copied.
+    async fn local_app_with(dir: &TestDir, not_copied: Vec<String>) -> (u16, tokio::sync::mpsc::UnboundedReceiver<Control>) {
         let listener = bind(0).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let (control, asked) = tokio::sync::mpsc::unbounded_channel();
         let state = LocalState {
             cfg: Arc::new(Mutex::new(Config::new())),
-            data: dir.path().to_path_buf(),
+            settings: dir.path().to_path_buf(),
+            not_copied: Arc::new(not_copied),
             agent: Default::default(),
             identity: Arc::new(Identity::generate().unwrap()),
             http: reqwest::Client::new(),
@@ -432,6 +443,22 @@ mod tests {
                 Some(content) => assert_eq!(shared_file(&dir), content, "nothing is written"),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn the_page_is_told_what_of_the_earlier_folder_could_not_be_copied() {
+        let info = |port: u16| async move {
+            let own = format!("127.0.0.1:{port}");
+            let (status, info) = send(port, "GET /local/info", &[("Host", own.as_str())], "").await;
+            assert_eq!(status, 200, "{info}");
+            serde_json::from_str::<serde_json::Value>(&info).unwrap()["not_copied"].clone()
+        };
+        let dir = TestDir::new();
+        let (port, _asked) = local_app(&dir).await;
+        assert_eq!(info(port).await, json!([]));
+        let problem = r"couldn't copy the farm: C:\old\server\farm.sqlite is in use by another program".to_string();
+        let (port, _asked) = local_app_with(&dir, vec![problem.clone()]).await;
+        assert_eq!(info(port).await, json!([problem]));
     }
 
     #[tokio::test]

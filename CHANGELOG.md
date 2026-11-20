@@ -46,6 +46,18 @@ machines again on the farm's computer (*Machines*).
   follows Windows: Spanish if Windows is in Spanish, English otherwise. Before, it followed the language
   of the browser inside the window.
 
+- **OpenFarm's files move to the Open3D folders,** with the other Open3D apps: its settings to
+  `%APPDATA%\Open3D\OpenFarm`, the farm (its database, scenes, previews and task logs), the caches and the
+  log to `%LOCALAPPDATA%\Open3D\OpenFarm`. The first time the new version starts it copies the settings and
+  the farm from the old folder, `%LOCALAPPDATA%\OpenFarm`, so nothing has to be set up again: the machine
+  keeps its key and its place in the farm, and the farm keeps its machines, their approvals and its jobs.
+  The window's data, the scenes kept by render machines and the old log are not copied; scenes are
+  downloaded again when a job needs them. The old folder is left as it was, so an older OpenFarm still
+  finds everything there. If something cannot be copied (for example, the farm is still open in another
+  OpenFarm), OpenFarm says so in its window, keeps using the old folder for it and tries again the next
+  time it starts. `--data <folder>` still keeps everything in that one folder, and nothing is copied for
+  it.
+
 - **An open window no longer asks the farm without a pause.** The window is meant to wait until
   something changes on the farm. Since the first version it asked again at once, about a thousand times
   a second for as long as it was open. It waits now.

@@ -99,8 +99,12 @@ paths.
 - TCP **47100**: the farm (on the farm's computer). UDP **47101**: finding the farm. TCP **47102**: the
   window and the 3ds Max / Blender buttons (this computer only). Windows may ask to let OpenFarm through
   its firewall on private networks.
-- Settings, the farm's database, the scene snapshots and the caches live in
-  `%LOCALAPPDATA%\OpenFarm` (`--data <folder>` uses another one).
+- The settings, `config.json`, live in `%APPDATA%\Open3D\OpenFarm`; the farm's database, the scene
+  snapshots, the caches and the log in `%LOCALAPPDATA%\Open3D\OpenFarm` (`--data <folder>` keeps them all
+  in that one folder instead).
+- Version 0.1.1 and earlier kept everything in `%LOCALAPPDATA%\OpenFarm`. The first start of a newer
+  version copies the settings and the farm from there, so the machine keeps its key and the farm its
+  machines, approvals and jobs, and leaves that folder as it was.
 
 ## Security
 
@@ -148,9 +152,9 @@ OpenFarm is made for a local network you trust. What it protects, and what it do
 ## Uninstall
 
 Quit OpenFarm (*This machine > Quit OpenFarm*), then remove it with the launcher (or delete its folder),
-and delete `%LOCALAPPDATA%\OpenFarm`,
-`%APPDATA%\Autodesk\ApplicationPlugins\OpenFarm.bundle` and the Blender add-on
-(*Preferences > Get Extensions > OpenFarm > Uninstall*).
+and delete `%APPDATA%\Open3D\OpenFarm`, `%LOCALAPPDATA%\Open3D\OpenFarm`, the folder of 0.1.1 and earlier
+`%LOCALAPPDATA%\OpenFarm` if it is there, `%APPDATA%\Autodesk\ApplicationPlugins\OpenFarm.bundle` and the
+Blender add-on (*Preferences > Get Extensions > OpenFarm > Uninstall*).
 
 ## Building
 

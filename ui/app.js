@@ -39,6 +39,7 @@ const T = {
     installed_blender: "Installed and turned on. Restart Blender: Properties › Output › OpenFarm.",
     change_role: "Change role", quit: "Quit OpenFarm", confirm_quit: "Quit OpenFarm on this computer? Renders running here stop and go back to the queue.",
     language: "Language", language_not_saved: "The language could not be saved for the other Open3D apps: {error}",
+    not_copied: "Some files of the earlier OpenFarm could not be copied to its new folders: {error}",
     setup_title: "Set up OpenFarm on this computer",
     setup_server: "This computer runs the farm", setup_server_p: "It keeps the queue and hands out work. Other computers join it. It can render too.",
     setup_join: "Join a farm", setup_join_p: "This computer renders for a farm and can send jobs to it.",
@@ -83,6 +84,7 @@ const T = {
     installed_blender: "Instalado y activado. Reinicia Blender: Propiedades › Salida › OpenFarm.",
     change_role: "Cambiar papel", quit: "Salir de OpenFarm", confirm_quit: "¿Salir de OpenFarm en este equipo? Los renders que hay aquí se paran y vuelven a la cola.",
     language: "Idioma", language_not_saved: "No se pudo guardar el idioma para las demás aplicaciones de Open3D: {error}",
+    not_copied: "Algunos archivos del OpenFarm anterior no se pudieron copiar a sus carpetas nuevas: {error}",
     setup_title: "Configurar OpenFarm en este equipo",
     setup_server: "Este equipo lleva la granja", setup_server_p: "Guarda la cola y reparte el trabajo. Los demás equipos se unen a él. También puede renderizar.",
     setup_join: "Unirse a una granja", setup_join_p: "Este equipo renderiza para una granja y puede enviarle trabajos.",
@@ -126,9 +128,9 @@ function dur(secs) {
   return t("hours", { h: Math.floor(m / 60), m: m % 60 });
 }
 function when(ms) { return ms ? new Date(ms).toLocaleString() : "–"; }
-function toast(text, bad) {
+function toast(text, bad, ms = 4000) {
   const el = $("#toast"); el.textContent = text; el.className = "toast" + (bad ? " bad" : "");
-  clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add("hidden"), 4000);
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add("hidden"), ms);
 }
 function modal(html) { $("#modalBody").innerHTML = html; $("#modal").classList.remove("hidden"); }
 $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal" || e.target.classList.contains("modal-close")) $("#modal").classList.add("hidden"); });
@@ -537,6 +539,8 @@ function renderSetup(main, changing) {
   await loadMe();
   const [p, id] = location.hash.slice(1).split("/");
   if (p === "job" && id) go("job", Number(id)); else render();
+  // What of an earlier OpenFarm's folder could not be copied to the new folders when this one started.
+  if (me && me.not_copied && me.not_copied.length) toast(t("not_copied", { error: me.not_copied.join("; ") }), true, 30000);
   meLoop();
   farmLoop();
 })();

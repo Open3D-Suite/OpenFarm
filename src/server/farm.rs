@@ -13,7 +13,7 @@ use openfarm_core::{auto_chunk, frames, order, scheduler};
 use serde::Serialize;
 use tokio::sync::{mpsc, watch};
 
-use super::db::{Db, StoredJob, StoredMachine};
+use super::db::{Db, FILE as DATABASE, StoredJob, StoredMachine};
 use crate::config::{VERSION, now_ms};
 
 /// What a machine is told when it comes with the id of a machine the farm knows and another key.
@@ -146,7 +146,7 @@ impl Farm {
         for d in ["scenes", "thumbs", "logs"] {
             std::fs::create_dir_all(data.join(d))?;
         }
-        let db = Db::open(&data.join("farm.sqlite"))?;
+        let db = Db::open(&data.join(DATABASE))?;
         let (max_job, max_task) = db.max_ids()?;
         let mut farm = Farm {
             name,

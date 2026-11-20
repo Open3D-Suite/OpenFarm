@@ -10,6 +10,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+/// The database's file, in the server's folder.
+pub const FILE: &str = "farm.sqlite";
+
 pub struct Db {
     conn: Connection,
 }

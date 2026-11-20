@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! This machine's settings: its role in the farm, its identity and where its data lives.
+//! This machine's settings, in `config.json`: its role in the farm, its identity and its ports.
+//! Where the file is: `crate::folders`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
@@ -14,6 +15,8 @@ pub const SERVER_PORT: u16 = 47100;
 pub const DISCOVERY_PORT: u16 = 47101;
 pub const LOCAL_PORT: u16 = 47102;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The settings' file, in the settings folder.
+pub const SETTINGS_FILE: &str = "config.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -113,7 +116,7 @@ impl Config {
     }
 
     pub fn load_or_create(data: &Path) -> Result<Config> {
-        let path = data.join("config.json");
+        let path = data.join(SETTINGS_FILE);
         let (mut cfg, mut save) = if path.exists() {
             let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
             let value: serde_json::Value = serde_json::from_str(&text).with_context(|| format!("reading {}", path.display()))?;
@@ -162,7 +165,7 @@ impl Config {
         std::fs::create_dir_all(data)?;
         let tmp = data.join("config.json.part");
         std::fs::write(&tmp, serde_json::to_string_pretty(self)?)?;
-        std::fs::rename(&tmp, data.join("config.json"))?;
+        std::fs::rename(&tmp, data.join(SETTINGS_FILE))?;
         Ok(())
     }
 
@@ -205,9 +208,11 @@ pub fn computer_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "this-computer".into())
 }
 
-/// `%LOCALAPPDATA%\OpenFarm` unless `--data` says otherwise.
-pub fn default_data_dir() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("OpenFarm")
+/// The port of the local app in the `config.json` of `dir`, read without making or changing
+/// anything: [`LOCAL_PORT`] when there is no file, it cannot be read or it does not say.
+pub fn local_port_in(dir: &Path) -> u16 {
+    let read = std::fs::read(dir.join(SETTINGS_FILE)).ok().and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    read.and_then(|value| value.get("local_port")?.as_u64()).and_then(|port| u16::try_from(port).ok()).unwrap_or(LOCAL_PORT)
 }
 
 pub fn now_ms() -> u64 {
@@ -288,6 +293,23 @@ mod tests {
         assert_eq!(value["machine_id"], "0b6c2a54-6f0e-4c0e-9a51-0d4d0f4b7a11");
         let again = Config::load_or_create(dir.path()).unwrap();
         assert_eq!(again.identity().unwrap().fingerprint(), identity.fingerprint());
+    }
+
+    #[test]
+    fn the_port_of_the_local_app_is_read_without_writing() {
+        let dir = TestDir::new();
+        // No file, a file that is not JSON, one without the setting or with a port that is none.
+        assert_eq!(local_port_in(dir.path()), LOCAL_PORT);
+        for text in ["not json", "{}", r#"{"local_port":"47202"}"#, r#"{"local_port":70000}"#, r#"{"local_port":-1}"#] {
+            std::fs::write(dir.path().join(SETTINGS_FILE), text).unwrap();
+            assert_eq!(local_port_in(dir.path()), LOCAL_PORT, "{text}");
+            assert_eq!(std::fs::read_to_string(dir.path().join(SETTINGS_FILE)).unwrap(), text);
+        }
+        let mut cfg = Config::new();
+        cfg.local_port = 47202;
+        cfg.save(dir.path()).unwrap();
+        assert_eq!(local_port_in(dir.path()), 47202);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "nothing but config.json");
     }
 
     #[test]

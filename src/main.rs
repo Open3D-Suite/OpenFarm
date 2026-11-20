@@ -3,8 +3,9 @@
 //!
 //!   OpenFarm                         the window (first run asks for this machine's role)
 //!   OpenFarm --headless              no window (render nodes, tests)
-//!   --data <dir>                     where settings, the farm and the caches live
-//!                                    (default %LOCALAPPDATA%\OpenFarm)
+//!   --data <dir>                     one folder for the settings, the farm and the caches
+//!                                    (default: %APPDATA%\Open3D\OpenFarm for the settings and
+//!                                    %LOCALAPPDATA%\Open3D\OpenFarm for the rest; see `folders`)
 //!   --role server|agent  --server <address>  --kind node|workstation  --name <name>
 //!   --farm-name <name>  --no-render  --server-port <n>  --local-port <n>  --no-discovery
 //!                                    set and save the role without the first-run page
@@ -16,7 +17,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use openfarm::agent::{AgentStatus, SharedStatus};
-use openfarm::config::{Config, MachineKind, Role, default_data_dir};
+use openfarm::config::{self, Config, MachineKind, Role};
+use openfarm::folders::Plan;
 use openfarm::local::{self, Control, LocalState, SharedLanguage};
 use openfarm::open3d_settings;
 
@@ -96,10 +98,27 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let data = args.data.clone().unwrap_or_else(default_data_dir);
+    // Where this run keeps its files. Nothing is read in them but the port of the local app, which
+    // only one OpenFarm can hold: a second start shows the first one's window, and copies, reads and
+    // writes nothing more.
+    let plan = Plan::new(args.data.clone());
+    let port = args.local_port.unwrap_or_else(|| config::local_port_in(plan.settings_now()));
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio");
+    let Some(listener) = bind_local(&rt, port, args.restarting) else {
+        let url = format!("http://127.0.0.1:{port}/local/show");
+        let _ = rt.block_on(reqwest::Client::new().post(url).send());
+        return;
+    };
+    // The folders of an earlier OpenFarm are copied before anything is read or written in the new
+    // ones: the log, the settings, the farm's database, the web view.
+    let folders = plan.prepare();
+    let data = folders.data.clone();
     let _ = std::fs::create_dir_all(data.join("logs"));
     init_logging(&data);
-    let cfg = settings(&data, &args);
+    for problem in &folders.problems {
+        tracing::warn!("copying the files of an earlier OpenFarm: {problem}");
+    }
+    let cfg = settings(&folders.settings, &args);
     // This machine's key pair: it signs everything this machine sends to the farm server.
     let identity = match cfg.identity() {
         Ok(i) => Arc::new(i),
@@ -115,25 +134,20 @@ fn main() {
     tracing::info!(
         version = openfarm::config::VERSION,
         role = ?cfg.role,
+        settings = %folders.settings.display(),
         data = %data.display(),
+        farm = %folders.farm.join("server").display(),
         key = %identity.fingerprint(),
         language = language.shown().code(),
         "OpenFarm starting"
     );
 
-    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio");
-    // One OpenFarm per data folder: a second start shows the first one's window.
-    let Some(listener) = bind_local(&rt, cfg.local_port, args.restarting) else {
-        let url = format!("http://127.0.0.1:{}/local/show", cfg.local_port);
-        let _ = rt.block_on(reqwest::Client::new().post(url).send());
-        return;
-    };
-
     let (ctl_tx, ctl_rx) = tokio::sync::mpsc::unbounded_channel::<Control>();
     let status: SharedStatus = Arc::new(Mutex::new(AgentStatus::default()));
     let state = LocalState {
         cfg: Arc::new(Mutex::new(cfg.clone())),
-        data: data.clone(),
+        settings: folders.settings.clone(),
+        not_copied: Arc::new(folders.problems.clone()),
         agent: status.clone(),
         identity: identity.clone(),
         http: reqwest::Client::builder().connect_timeout(Duration::from_secs(5)).build().expect("http"),
@@ -146,7 +160,7 @@ fn main() {
         }
     });
     if cfg.role == Role::Server {
-        let (c, d) = (cfg.clone(), data.clone());
+        let (c, d) = (cfg.clone(), folders.farm.clone());
         rt.spawn(async move {
             if let Err(e) = openfarm::server::run(&c, &d).await {
                 tracing::error!("farm server: {e:#}");
@@ -167,7 +181,7 @@ fn main() {
     if args.headless {
         wait_headless(&rt, ctl_rx);
     }
-    let url = format!("http://127.0.0.1:{}/", cfg.local_port);
+    let url = format!("http://127.0.0.1:{port}/");
     // Keep the runtime alive on its own threads while the window owns the main thread.
     let _guard = rt.enter();
     std::mem::forget(rt);
@@ -176,8 +190,8 @@ fn main() {
 
 /// This machine's settings with the options of the command line in them, saved again when any was
 /// given. Ends the program if the settings can be neither read nor made.
-fn settings(data: &Path, args: &Args) -> Config {
-    let mut cfg = match Config::load_or_create(data) {
+fn settings(dir: &Path, args: &Args) -> Config {
+    let mut cfg = match Config::load_or_create(dir) {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("settings: {e:#}");
@@ -186,7 +200,7 @@ fn settings(data: &Path, args: &Args) -> Config {
         }
     };
     if apply_args(&mut cfg, args) {
-        let _ = cfg.save(data);
+        let _ = cfg.save(dir);
     }
     cfg
 }
@@ -220,8 +234,8 @@ fn apply_args(cfg: &mut Config, args: &Args) -> bool {
     changed
 }
 
-/// Takes the port of the local app, which only one OpenFarm per data folder can hold. `None` when
-/// another one has it. After a restart it waits for the OpenFarm that is ending to let go of it.
+/// Takes the port of the local app, which only one OpenFarm can hold. `None` when another one has
+/// it. After a restart it waits for the OpenFarm that is ending to let go of it.
 fn bind_local(rt: &tokio::runtime::Runtime, port: u16, restarting: bool) -> Option<tokio::net::TcpListener> {
     rt.block_on(async {
         let tries = if restarting { 40 } else { 1 };
