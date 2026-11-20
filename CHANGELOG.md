@@ -66,8 +66,9 @@ machines again on the farm's computer (*Machines*).
 - **An installer is on its way.** Each release also carries `openfarm-<version>-windows-x64.msi`, which
   installs OpenFarm for everyone on the computer in `C:\Program Files\Open3D\OpenFarm`, with a shortcut
   in the Start menu; Windows asks for permission first. It adds no firewall rule: the first time OpenFarm
-  runs from there, Windows may ask once to let it through its firewall. The Open3D launcher will use it
-  in a coming version; the zip stays as it is.
+  runs from there, Windows may ask once to let it through its firewall; the README says how to remove the
+  rules of the copy you had before. The Open3D launcher will use it in a coming version; the zip stays
+  as it is.
 
 - **An open window no longer asks the farm without a pause.** The window is meant to wait until
   something changes on the farm. Since the first version it asked again at once, about a thousand times

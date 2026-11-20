@@ -99,6 +99,14 @@ paths.
 - TCP **47100**: the farm (on the farm's computer). UDP **47101**: finding the farm. TCP **47102**: the
   window and the 3ds Max / Blender buttons (this computer only). Windows may ask to let OpenFarm through
   its firewall on private networks.
+- Windows lets OpenFarm through its firewall by the place of `OpenFarm.exe`; OpenFarm itself adds and
+  removes no rule. Once OpenFarm is installed with its installer (`openfarm-<version>-windows-x64.msi`)
+  in `C:\Program Files\Open3D\OpenFarm`, Windows asks once more, and the rules it made for the copy you
+  had before, in `%LOCALAPPDATA%\Programs\Open3D\OpenFarm` (where the launcher put it) or wherever you
+  unzipped it, stay behind. They are no longer needed and would let through any program put in that
+  folder later, so remove them: search the Start menu for *Allow an app through Windows Firewall* and
+  open it, press *Change settings*, then select each *OpenFarm* in the list and press *Details*; if the
+  path shown is not in `C:\Program Files\Open3D\OpenFarm`, press *OK*, then *Remove*.
 - The settings, `config.json`, live in `%APPDATA%\Open3D\OpenFarm`; the farm's database, the scene
   snapshots, the caches and the log in `%LOCALAPPDATA%\Open3D\OpenFarm` (`--data <folder>` keeps them all
   in that one folder instead).
@@ -151,10 +159,12 @@ OpenFarm is made for a local network you trust. What it protects, and what it do
 
 ## Uninstall
 
-Quit OpenFarm (*This machine > Quit OpenFarm*), then remove it with the launcher (or delete its folder),
-and delete `%APPDATA%\Open3D\OpenFarm`, `%LOCALAPPDATA%\Open3D\OpenFarm`, the folder of 0.1.1 and earlier
+Quit OpenFarm (*This machine > Quit OpenFarm*), then remove it with the launcher, in *Settings > Apps >
+Installed apps* if it was installed with its installer, or by deleting its folder. Then delete
+`%APPDATA%\Open3D\OpenFarm`, `%LOCALAPPDATA%\Open3D\OpenFarm`, the folder of 0.1.1 and earlier
 `%LOCALAPPDATA%\OpenFarm` if it is there, `%APPDATA%\Autodesk\ApplicationPlugins\OpenFarm.bundle` and the
-Blender add-on (*Preferences > Get Extensions > OpenFarm > Uninstall*).
+Blender add-on (*Preferences > Get Extensions > OpenFarm > Uninstall*). In *Allow an app through Windows
+Firewall*, *Remove* each *OpenFarm* too (see [Network and files](#network-and-files)).
 
 ## Building
 
