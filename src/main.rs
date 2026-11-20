@@ -17,7 +17,8 @@ use std::time::Duration;
 
 use openfarm::agent::{AgentStatus, SharedStatus};
 use openfarm::config::{Config, MachineKind, Role, default_data_dir};
-use openfarm::local::{self, Control, LocalState};
+use openfarm::local::{self, Control, LocalState, SharedLanguage};
+use openfarm::open3d_settings;
 
 struct Args {
     data: Option<PathBuf>,
@@ -108,7 +109,17 @@ fn main() {
             std::process::exit(1);
         }
     };
-    tracing::info!(version = openfarm::config::VERSION, role = ?cfg.role, data = %data.display(), key = %identity.fingerprint(), "OpenFarm starting");
+    // The language of the interface: the one every Open3D app shares (`%APPDATA%\Open3D`, or the
+    // folder `OPEN3D_SETTINGS_DIR` names), or the language of Windows. Read once; nothing is written.
+    let language = Arc::new(SharedLanguage::read(open3d_settings::settings_dir()));
+    tracing::info!(
+        version = openfarm::config::VERSION,
+        role = ?cfg.role,
+        data = %data.display(),
+        key = %identity.fingerprint(),
+        language = language.shown().code(),
+        "OpenFarm starting"
+    );
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio");
     // One OpenFarm per data folder: a second start shows the first one's window.
@@ -127,6 +138,7 @@ fn main() {
         identity: identity.clone(),
         http: reqwest::Client::builder().connect_timeout(Duration::from_secs(5)).build().expect("http"),
         control: ctl_tx,
+        language,
     };
     rt.spawn(async move {
         if let Err(e) = local::serve(listener, state).await {

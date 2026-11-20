@@ -38,6 +38,7 @@ const T = {
     installed_max: "Installed. Restart 3ds Max, then add “Send to OpenFarm” (category OpenFarm) to a toolbar or menu.",
     installed_blender: "Installed and turned on. Restart Blender: Properties › Output › OpenFarm.",
     change_role: "Change role", quit: "Quit OpenFarm", confirm_quit: "Quit OpenFarm on this computer? Renders running here stop and go back to the queue.",
+    language: "Language", language_not_saved: "The language could not be saved for the other Open3D apps: {error}",
     setup_title: "Set up OpenFarm on this computer",
     setup_server: "This computer runs the farm", setup_server_p: "It keeps the queue and hands out work. Other computers join it. It can render too.",
     setup_join: "Join a farm", setup_join_p: "This computer renders for a farm and can send jobs to it.",
@@ -81,6 +82,7 @@ const T = {
     installed_max: "Instalado. Reinicia 3ds Max y añade «Send to OpenFarm» (categoría OpenFarm) a una barra o un menú.",
     installed_blender: "Instalado y activado. Reinicia Blender: Propiedades › Salida › OpenFarm.",
     change_role: "Cambiar papel", quit: "Salir de OpenFarm", confirm_quit: "¿Salir de OpenFarm en este equipo? Los renders que hay aquí se paran y vuelven a la cola.",
+    language: "Idioma", language_not_saved: "No se pudo guardar el idioma para las demás aplicaciones de Open3D: {error}",
     setup_title: "Configurar OpenFarm en este equipo",
     setup_server: "Este equipo lleva la granja", setup_server_p: "Guarda la cola y reparte el trabajo. Los demás equipos se unen a él. También puede renderizar.",
     setup_join: "Unirse a una granja", setup_join_p: "Este equipo renderiza para una granja y puede enviarle trabajos.",
@@ -92,7 +94,12 @@ const T = {
     gpu: "GPU", cpu: "CPU", ram: "RAM", minutes: "{m} min", seconds: "{s} s", hours: "{h} h {m} min",
   },
 };
-const lang = (navigator.language || "en").toLowerCase().startsWith("es") ? "es" : "en";
+// The language is the one every Open3D app shares: the local app read it when OpenFarm started, or the
+// language of Windows when there is no preference, and gives it in /local/info (see takeLanguage). The
+// choice on This machine changes it for every Open3D app. Until /local/info answers, and on a page the
+// farm server gives another computer's browser, which has no local app to ask, the browser's language.
+const LANGUAGES = { en: "English", es: "Español" };
+let lang = (navigator.language || "en").toLowerCase().startsWith("es") ? "es" : "en";
 const t = (k, vars) => {
   let s = (T[lang] && T[lang][k]) || T.en[k] || k;
   if (vars) for (const [a, b] of Object.entries(vars)) s = s.replaceAll("{" + a + "}", b);
@@ -168,10 +175,12 @@ async function meLoop() {
 
 // ---- navigation ------------------------------------------------------------------------------------
 
-for (const b of document.querySelectorAll("#tabs button")) {
-  b.textContent = t(b.dataset.t);
-  b.addEventListener("click", () => go(b.dataset.page));
+for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => go(b.dataset.page));
+function labelTabs() {
+  document.documentElement.lang = lang;
+  for (const b of document.querySelectorAll("#tabs button")) b.textContent = t(b.dataset.t);
 }
+labelTabs();
 function go(p, arg) {
   page = p;
   if (p === "job") { detail = { id: arg, data: null }; location.hash = "job/" + arg; refreshDetail(); }
@@ -186,7 +195,37 @@ window.addEventListener("hashchange", () => {
 
 // ---- rendering --------------------------------------------------------------------------------------
 
+// The language the local app says the page shows; on a change the page is drawn again in it.
+function takeLanguage() {
+  const code = me && me.language;
+  if (!T[code] || code === lang) return;
+  lang = code;
+  labelTabs();
+  $("#main").innerHTML = "";
+}
+
+// The language choice: English or Español. It is written for every Open3D app and shows at once.
+function languagePicker() {
+  const options = Object.entries(LANGUAGES).map(([code, name]) => `<option value="${code}" lang="${code}" ${code === lang ? "selected" : ""}>${esc(name)}</option>`).join("");
+  return `<select id="language" style="width:auto">${options}</select>`;
+}
+function wireLanguage(root) {
+  const select = $("#language", root);
+  if (!select) return;
+  select.addEventListener("change", async () => {
+    select.disabled = true;
+    let error = null;
+    try { await api("/local/language", { language: select.value }); } catch (e) { error = e.message; }
+    await loadMe();
+    render();
+    // Where the page was not drawn again (the first-run page, when nothing changed).
+    select.disabled = false; select.value = lang;
+    if (error) toast(t("language_not_saved", { error }), true);
+  });
+}
+
 function render(error) {
+  takeLanguage();
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.page === page || (page === "job" && b.dataset.page === "jobs"));
   $("#farmName").textContent = farm ? farm.farm : (me && me.farm_name) || "";
   renderStatus();
@@ -433,11 +472,13 @@ function renderMe(main) {
         <div>${t("cpu")}</div><div>${esc((a.caps && a.caps.cpu) || "")} ${a.caps ? "· " + a.caps.threads + " · " + Math.round(a.caps.ram_mb / 1024) + " GB" : ""}</div>
         <div>${t("gpu")}</div><div>${gpus || "–"}</div>
         <div>${t("software")}</div><div class="chips" style="margin:0">${sw}</div>
+        <div>${t("language")}</div><div>${languagePicker()}</div>
       </div>
       <h2>${esc(t("integrations"))}</h2>
       <div class="row"><button class="btn" data-install="max">${esc(t("install_max"))}</button><button class="btn" data-install="blender">${esc(t("install_blender"))}</button></div>
       <div class="row" style="margin-top:18px"><button class="btn" id="changeRole">${esc(t("change_role"))}</button><span class="grow"></span><button class="btn danger" id="quit">${esc(t("quit"))}</button></div>
     </div>`;
+  wireLanguage(main);
   const acc = $("#accepting");
   if (acc) acc.addEventListener("change", async () => { await api("/local/accepting", { accepting: acc.checked }); await loadMe(); render(); });
   for (const b of main.querySelectorAll("button[data-install]")) b.addEventListener("click", async () => {
@@ -452,6 +493,7 @@ function renderMe(main) {
 function renderSetup(main, changing) {
   main.innerHTML = `
     <div id="setup"><h1 style="text-align:center;margin-top:20px">${esc(t("setup_title"))}</h1>
+    ${changing ? "" : `<p class="muted" style="text-align:center">${esc(t("language"))} ${languagePicker()}</p>`}
     <div class="setup">
       <div class="card"><h2>${esc(t("setup_server"))}</h2><p>${esc(t("setup_server_p"))}</p>
         <form class="grid" style="grid-template-columns:1fr" id="fServer">
@@ -470,6 +512,7 @@ function renderSetup(main, changing) {
           <button class="btn primary" type="submit">${esc(t("start"))}</button>
         </form></div>
     </div>${changing ? `<p style="text-align:center"><a href="#me" onclick="location.reload()">${esc(t("back").replace("Jobs", "").replace("Trabajos", ""))}</a></p>` : ""}</div>`;
+  wireLanguage(main);
   const start = async (body) => {
     try { await api("/local/setup", body); } catch (e) { toast(e.message, true); return; }
     main.innerHTML = `<div class="empty">${esc(t("restarting"))}</div>`;

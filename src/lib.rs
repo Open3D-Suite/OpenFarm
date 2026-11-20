@@ -13,6 +13,9 @@ pub mod imaging;
 pub mod integrations;
 pub mod local;
 pub mod loopback;
+// The language shared by every Open3D app: a copy of a common file. Its one call to Windows, for
+// the language of Windows, allows `unsafe` by name.
+pub mod open3d_settings;
 pub mod server;
 pub mod ui;
 pub mod window;

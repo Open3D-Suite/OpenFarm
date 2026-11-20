@@ -39,6 +39,13 @@ machines again on the farm's computer (*Machines*).
   it downloaded, or kept from an earlier job, is exactly the scene its job names. A scene that was
   changed or damaged on the way is deleted and the task fails saying so, instead of rendering it.
 
+- **The same language as the Open3D launcher and the other Open3D apps.** The window now shows the
+  language chosen in the launcher or in another Open3D app. *This machine* (and the first page, when you
+  set OpenFarm up) has a *Language* choice, English or Español: it changes the window at once, and the
+  launcher and the other apps take it the next time they start. If no language was ever chosen, OpenFarm
+  follows Windows: Spanish if Windows is in Spanish, English otherwise. Before, it followed the language
+  of the browser inside the window.
+
 - **An open window no longer asks the farm without a pause.** The window is meant to wait until
   something changes on the farm. Since the first version it asked again at once, about a thousand times
   a second for as long as it was open. It waits now.

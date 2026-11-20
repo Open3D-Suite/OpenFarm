@@ -4,9 +4,9 @@ members = ["crates/core"]
 resolver = "2"
 
 # The lints common to every OPEN3D Rust project. `unsafe` is denied here and not forbidden because
-# three places call Windows and need it; each says so where it is allowed: the `dpapi` and
-# `agent::jobobj` modules and one function of `window`. The crates without `unsafe` forbid it in
-# their first lines.
+# four places call Windows and need it; each says so where it is allowed: the `dpapi` and
+# `agent::jobobj` modules, one function of `window` and one of `open3d_settings` (the language of
+# Windows). The crates without `unsafe` forbid it in their first lines.
 [workspace.lints.rust]
 unsafe_code = "deny"
 

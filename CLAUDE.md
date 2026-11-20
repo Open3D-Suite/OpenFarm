@@ -13,6 +13,8 @@ as a change that makes it old.
 - `src/agent/`: `runner.rs` runs a task; `hosts.rs` keeps 3ds Max or Blender open between tasks.
 - `src/local.rs`: the local app on 127.0.0.1 for the window (`src/window.rs`) and the submitters; it
   relays `/api/v1` to the server. `src/config.rs`: `config.json` and the ports (server 47100, local 47102).
+- `src/open3d_settings.rs`: the language every Open3D app shares, with the cases its tests read
+  (`src/open3d_settings_cases.txt`).
 - `ui/` (plain HTML, JavaScript and CSS, no build step; English and Spanish texts in `ui/app.js`),
   `hosts/*.py` (run inside 3ds Max and Blender) and `integrations/` (the submitters) are built into the exe.
 - `tests/*.py`: checks outside `cargo test`, against a running farm; `tests/max_button.py` needs no
@@ -27,13 +29,14 @@ as a change that makes it old.
   what `tools/repo.toml` lists:
   - `cargo fmt --all --check`, `ruff format --check .` and `ruff check .`
   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-  - `cargo test --workspace --locked` (82 tests; without `--workspace` the 18 of `crates/core` do not run)
+  - `cargo test --workspace --locked` (92 tests; without `--workspace` the 18 of `crates/core` do not run)
   - only with `-Full`: `tests/max_button.py` in `3dsmaxbatch`; the other `tests/*.py` are left out
 - CI: `.github/workflows/check.yml` runs `tools\check.ps1`, without `-Full`, on every push and pull request
   to `main`, on GitHub's Windows runner with Python 3.14.
 - `.editorconfig`, `.gitattributes`, `rustfmt.toml`, `clippy.toml`, `ruff.toml`, `LICENSE`,
   `tools/check.ps1`, `tools/repo.py`, `tools/repo_package.py` and `tools/repo_release.py` are the same in
-  every Open3D repo. Do not change them here.
+  every Open3D repo, and `src/open3d_settings.rs` with `src/open3d_settings_cases.txt` in every repo that
+  has them. Do not change them here.
 
 ## Version and release
 
@@ -64,8 +67,15 @@ as a change that makes it old.
 - A job names its scene by its BLAKE3 hash; an agent checks the hash of each scene it downloads.
 - `/api/v1/scenes/from-path` from the network takes only files inside the `scene_folders` of `config.json`.
 - Traffic is not encrypted: the README says OpenFarm is for a trusted local network only.
+- The language is the one every Open3D app shares, in `settings.json` (`%APPDATA%\Open3D`, or the folder
+  `OPEN3D_SETTINGS_DIR` names). The local app reads it once at start (`SharedLanguage` in `src/local.rs`);
+  with no preference the language of Windows decides: Spanish if it is Spanish, else English. The page
+  gets it from `/local/info`; its Language choice (*This machine*, and the first-run page) writes the file
+  through `POST /local/language` and changes at once. OpenFarm kept no language before, so nothing is
+  carried over. A page the farm server gives another computer's browser follows that browser.
 - `unsafe` is denied. It is allowed by name, with its reason, only where Windows is called: the `dpapi`
-  and `agent::jobobj` modules and one function of `src/window.rs`.
+  and `agent::jobobj` modules, one function of `src/window.rs` and `user_interface_language` in
+  `src/open3d_settings.rs`.
 - The farm's state is under one `std::sync::Mutex`; its guard is never held across an `.await`.
 - The server turns away an agent whose `PROTOCOL` is not its own; the app's version is not compared.
 - Output folders must be full paths: the server and the agent both refuse any other.
