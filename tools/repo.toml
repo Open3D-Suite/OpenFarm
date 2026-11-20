@@ -34,6 +34,11 @@ run = ["ruff", "format", "--check", "."]
 name = "ruff check"
 run = ["ruff", "check", "."]
 
+# Every text of the Blender add-on has its Spanish; it reads the add-on as text, without Blender.
+[[check]]
+name = "Blender add-on texts"
+run = ["python", "-I", "tests/blender_texts.py"]
+
 [[check]]
 name = "cargo clippy"
 run = ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"]

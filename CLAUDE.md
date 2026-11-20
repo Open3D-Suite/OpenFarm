@@ -19,7 +19,7 @@ as a change that makes it old.
 - `ui/` (plain HTML, JavaScript and CSS, no build step; English and Spanish texts in `ui/app.js`),
   `hosts/*.py` (run inside 3ds Max and Blender) and `integrations/` (the submitters) are built into the exe.
 - `tests/*.py`: checks outside `cargo test`, against a running farm; `tests/max_button.py` needs no
-  farm, only a 3ds Max batch session.
+  farm, only a 3ds Max batch session, and `tests/blender_texts.py` neither farm nor Blender.
 
 ## Build and check
 
@@ -29,6 +29,7 @@ as a change that makes it old.
   the licence line of every source (`ui/` too), the common lints, no path of somebody's computer. Then
   what `tools/repo.toml` lists:
   - `cargo fmt --all --check`, `ruff format --check .` and `ruff check .`
+  - `tests/blender_texts.py`: every text of the Blender add-on has its Spanish
   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
   - `cargo test --workspace --locked` (109 tests; without `--workspace` the 18 of `crates/core` do not run)
   - only with `-Full`: `tests/max_button.py` in `3dsmaxbatch`; the other `tests/*.py` are left out
@@ -74,6 +75,9 @@ as a change that makes it old.
   gets it from `/local/info`; its Language choice (*This machine*, and the first-run page) writes the file
   through `POST /local/language` and changes at once. OpenFarm kept no language before, so nothing is
   carried over. A page the farm server gives another computer's browser follows that browser.
+- The Blender add-on follows Blender's interface language instead, through Blender's own translation
+  system: its Spanish is `SPANISH` in its `__init__.py`, which `tests/blender_texts.py` checks. The 3ds
+  Max button is in English only.
 - Its files, from `src/folders.rs`: `config.json` in `%APPDATA%\Open3D\OpenFarm`; the log, `webview`,
   `server` (the farm's database, scenes, previews, task logs) and `agent` in `%LOCALAPPDATA%\Open3D\OpenFarm`;
   `OPEN3D_SETTINGS_DIR` and `OPEN3D_DATA_DIR` move them. `--data` keeps everything in its one folder and

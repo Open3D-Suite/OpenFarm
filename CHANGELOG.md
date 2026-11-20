@@ -45,6 +45,9 @@ machines again on the farm's computer (*Machines*).
   launcher and the other apps take it the next time they start. If no language was ever chosen, OpenFarm
   follows Windows: Spanish if Windows is in Spanish, English otherwise. Before, it followed the language
   of the browser inside the window.
+- **The Blender add-on speaks Spanish too.** Its panel, its tooltips and its messages are in Spanish when
+  Blender's interface is in Spanish, and change with it, like Blender's own texts. The 3ds Max button
+  stays in English, as 3ds Max does.
 
 - **OpenFarm's files move to the Open3D folders,** with the other Open3D apps: its settings to
   `%APPDATA%\Open3D\OpenFarm`, the farm (its database, scenes, previews and task logs), the caches and the
