@@ -53,9 +53,11 @@ name = "3ds Max button"
 run = ["3dsmaxbatch", "tests/max_button.py", "-mxsString", "bundle:integrations/max/OpenFarm.bundle"]
 full = true
 
-# The release package: dist/openfarm-<version>-windows-x64.zip, with OpenFarm.exe at its root, and
-# dist/SHA256SUMS.txt. The launcher installs it from there. The tests run among the quick checks, before
-# the build; the packager also trims this computer's folders from the bundled C code (aws-lc).
+# The release package: dist/openfarm-<version>-windows-x64.zip, with OpenFarm.exe at its root, the
+# Windows Installer package dist/openfarm-<version>-windows-x64.msi, which installs the same files into
+# C:\Program Files\Open3D\OpenFarm, and dist/SHA256SUMS.txt. The launcher installs them from there. The
+# tests run among the quick checks, before the build; the packager also trims this computer's folders
+# from the bundled C code (aws-lc).
 [package]
 name = "OpenFarm"
 build = [["cargo", "build", "--release", "--locked"]]
@@ -69,3 +71,10 @@ files = [
 ]
 exe = "OpenFarm.exe"
 version_answer = "OpenFarm {version}"
+
+[package.msi]
+# Made once for OpenFarm and never changed: by it Windows knows that a new version replaces the old.
+upgrade_code = "1DA689B7-B541-46CE-87BE-6CC82F59108F"
+shortcut = "OpenFarm"
+# The icon build.rs gives OpenFarm.exe, for Installed apps.
+icon = "assets/icon.ico"

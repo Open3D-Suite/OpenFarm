@@ -53,13 +53,18 @@ as a change that makes it old.
   `tools/repo.toml` says: the version and its `## X.Y.Z` section in the CHANGELOG, the quick checks (the
   tests among them), `cargo build --release --locked` without this computer's folders in the exe
   (`/d1trimfile` for the bundled C code), the licences of the dependencies in `THIRD-PARTY-LICENSES.txt`,
-  then `dist/openfarm-<version>-windows-x64.zip` (`OpenFarm.exe`, README, LICENSE, CHANGELOG) and
-  `dist/SHA256SUMS.txt`. It refuses an exe that holds a path of the computer that built it, or whose file
-  version or `--version` is not the version.
+  then `dist/openfarm-<version>-windows-x64.zip` (`OpenFarm.exe`, README, LICENSE, CHANGELOG,
+  `THIRD-PARTY-LICENSES.txt`) and `dist/SHA256SUMS.txt`. It refuses an exe that holds a path of the
+  computer that built it, or whose file version or `--version` is not the version.
+- From the `[package.msi]` table it also makes `dist/openfarm-<version>-windows-x64.msi` with WiX 5 (`wix`
+  on PATH or as a .NET global tool): the same files, for everyone on the computer, into
+  `C:\Program Files\Open3D\OpenFarm`, with the Start menu shortcut `OpenFarm` and `assets/icon.ico` in
+  Installed apps, and no firewall rule. It is checked before it is written (WiX's ICEs, and its own tables
+  and files compared with the zip) and never installed.
 - `python -I tools/repo.py release X.Y.Z` turns `## In development` into `## X.Y.Z — <date>`, sets the
   version, commits `Release X.Y.Z`, packages, tags `vX.Y.Z` and prints the pushes to approve; run again
-  once they are done, it makes the GitHub release as a draft. It never pushes. `--dry-run` tries it all
-  and writes only to `dist/`.
+  once they are done, it makes the GitHub release as a draft, with the zip, the MSI and
+  `SHA256SUMS.txt`. It never pushes. `--dry-run` tries it all and writes only to `dist/`.
 - The Open3D launcher needs `OpenFarm.exe` at the root of the zip, its file version that of the release.
 
 ## Rules of this code
@@ -106,3 +111,5 @@ as a change that makes it old.
   `--server`, `--server-port`, `--name` and `--headless`; then `tests/e2e.py` with the `dummy` engine. It
   tests neither approval nor the signatures of `/api/v1`: what comes from the same computer is trusted.
 - 3ds Max and Blender run copies of `hosts/` and `integrations/` that the exe writes, not these files.
+- The `upgrade_code` of `[package.msi]` never changes: with another one, Windows would install a new
+  version beside the old one instead of in its place.
