@@ -61,6 +61,9 @@ machines again on the farm's computer (*Machines*).
   time it starts. `--data <folder>` still keeps everything in that one folder, and nothing is copied for
   it.
 
+- **Nothing else to install.** The Visual C++ runtime is now inside `OpenFarm.exe`, so it starts on a
+  Windows that has no Visual C++ Redistributable.
+
 - **An open window no longer asks the farm without a pause.** The window is meant to wait until
   something changes on the farm. Since the first version it asked again at once, about a thousand times
   a second for as long as it was open. It waits now.
