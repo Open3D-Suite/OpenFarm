@@ -5,7 +5,7 @@ on every machine of the office or the studio, checks every frame and shows the p
 No accounts, no licence keys, no cloud. Part of the [Open3D](https://github.com/carlesllavata/Open3D)
 suite of open-source tools for 3D work.
 
-**Version 0.1.1** – the first release, packaged again.
+**Version 0.1.1** – what each version changed is in the [CHANGELOG](CHANGELOG.md).
 
 Engines: **Corona**, **V-Ray**, **V-Ray GPU** and **FStorm** in 3ds Max; **Cycles** (CPU, CUDA, OptiX, HIP,
 oneAPI) and **Eevee** in Blender.
@@ -40,14 +40,20 @@ oneAPI) and **Eevee** in Blender.
 OpenFarm is a single program for Windows 10/11 (64-bit), installed on every computer of the farm. Two
 ways:
 
-- **With the [Open3D launcher](https://github.com/carlesllavata/Open3D)** (0.3.3 or later): press
-  *Install* on OpenFarm's card. It goes in `%LOCALAPPDATA%\Programs\Open3D\OpenFarm`, with shortcuts in
-  the Start menu and on the desktop, and the launcher updates it and removes it.
-- **By hand**: download `openfarm-<version>-windows-x64.zip` from the
-  [releases page](https://github.com/carlesllavata/OpenFarm/releases/latest), unzip it anywhere and run
-  `OpenFarm.exe`.
+- **With the [Open3D launcher](https://github.com/carlesllavata/Open3D)** (0.4.0 or later): press
+  *Install* on OpenFarm's card. The launcher installs OpenFarm for everyone on the computer in
+  `C:\Program Files\Open3D\OpenFarm`, with a shortcut in the Start menu, and updates it and removes it.
+  Windows asks for permission at each install and update, and names an "Unknown publisher": OpenFarm's
+  packages are not signed yet.
+- **By hand**, from the [releases page](https://github.com/carlesllavata/OpenFarm/releases/latest):
+  - `openfarm-<version>-windows-x64.msi` installs it the same way, with the same question from Windows;
+    the MSI of a newer version replaces the version installed.
+  - `openfarm-<version>-windows-x64.zip` needs no installing: unzip it anywhere and run `OpenFarm.exe`.
+    A portable Open3D launcher uses this one.
 
-Every computer of a farm should run the same version of OpenFarm.
+OpenFarm keeps its settings and its data in your user folders, not beside the program (see
+[Network and files](#network-and-files)); opened from a portable launcher, it keeps them in the
+launcher's folder. Every computer of a farm should run the same version of OpenFarm.
 
 The first time, OpenFarm asks what this computer does:
 
@@ -56,8 +62,9 @@ The first time, OpenFarm asks what this computer does:
   choose whether this is a workstation or a dedicated render node. On the farm's computer, approve the
   new machine in *Machines*.
 
-Closing the window can leave OpenFarm working in the background; opening OpenFarm again brings the
-window back. *This machine > Quit OpenFarm* stops it.
+Once the computer is set up, closing the window asks whether OpenFarm keeps working in the background;
+opening OpenFarm again brings the window back, and *This machine > Quit OpenFarm* stops it. Before that,
+closing the window quits OpenFarm.
 
 ### Sending jobs
 
@@ -100,13 +107,13 @@ paths.
   window and the 3ds Max / Blender buttons (this computer only). Windows may ask to let OpenFarm through
   its firewall on private networks.
 - Windows lets OpenFarm through its firewall by the place of `OpenFarm.exe`; OpenFarm itself adds and
-  removes no rule. Once OpenFarm is installed with its installer (`openfarm-<version>-windows-x64.msi`)
-  in `C:\Program Files\Open3D\OpenFarm`, Windows asks once more, and the rules it made for the copy you
-  had before, in `%LOCALAPPDATA%\Programs\Open3D\OpenFarm` (where the launcher put it) or wherever you
-  unzipped it, stay behind. They are no longer needed and would let through any program put in that
-  folder later, so remove them: search the Start menu for *Allow an app through Windows Firewall* and
-  open it, press *Change settings*, then select each *OpenFarm* in the list and press *Details*; if the
-  path shown is not in `C:\Program Files\Open3D\OpenFarm`, press *OK*, then *Remove*.
+  removes no rule. Once OpenFarm is installed in `C:\Program Files\Open3D\OpenFarm`, by the launcher or
+  with `openfarm-<version>-windows-x64.msi`, Windows asks once more, and the rules it made for the copy
+  you had before, in `%LOCALAPPDATA%\Programs\Open3D\OpenFarm` (where launchers before 0.4.0 put it) or
+  wherever you unzipped it, stay behind. They are no longer needed and would let through any program put
+  in that folder later, so remove them: search the Start menu for *Allow an app through Windows Firewall*
+  and open it, press *Change settings*, then select each *OpenFarm* in the list and press *Details*; if
+  the path shown is not in `C:\Program Files\Open3D\OpenFarm`, press *OK*, then *Remove*.
 - The settings, `config.json`, live in `%APPDATA%\Open3D\OpenFarm`; the farm's database, the scene
   snapshots, the caches and the log in `%LOCALAPPDATA%\Open3D\OpenFarm` (`--data <folder>` keeps them all
   in that one folder instead).
@@ -159,12 +166,14 @@ OpenFarm is made for a local network you trust. What it protects, and what it do
 
 ## Uninstall
 
-Quit OpenFarm (*This machine > Quit OpenFarm*), then remove it with the launcher, in *Settings > Apps >
-Installed apps* if it was installed with its installer, or by deleting its folder. Then delete
-`%APPDATA%\Open3D\OpenFarm`, `%LOCALAPPDATA%\Open3D\OpenFarm`, the folder of 0.1.1 and earlier
-`%LOCALAPPDATA%\OpenFarm` if it is there, `%APPDATA%\Autodesk\ApplicationPlugins\OpenFarm.bundle` and the
-Blender add-on (*Preferences > Get Extensions > OpenFarm > Uninstall*). In *Allow an app through Windows
-Firewall*, *Remove* each *OpenFarm* too (see [Network and files](#network-and-files)).
+Quit OpenFarm first (*This machine > Quit OpenFarm*). Then remove it from the launcher, or from Windows'
+*Settings > Apps > Installed apps* if it is in `C:\Program Files\Open3D\OpenFarm`; a copy from the zip
+goes by deleting its folder. Its settings and data stay: tick *Also delete its settings and data* in the
+launcher, or delete `%APPDATA%\Open3D\OpenFarm` and `%LOCALAPPDATA%\Open3D\OpenFarm` yourself. Then delete,
+if they are there, the folder of 0.1.1 and earlier, `%LOCALAPPDATA%\OpenFarm`, the 3ds Max button,
+`%APPDATA%\Autodesk\ApplicationPlugins\OpenFarm.bundle`, and the Blender add-on (*Preferences > Get
+Extensions > OpenFarm > Uninstall*). In *Allow an app through Windows Firewall*, *Remove* each *OpenFarm*
+too (see [Network and files](#network-and-files)).
 
 ## Building
 
