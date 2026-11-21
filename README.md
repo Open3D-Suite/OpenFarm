@@ -5,7 +5,7 @@ on every machine of the office or the studio, checks every frame and shows the p
 No accounts, no licence keys, no cloud. Part of the [Open3D](https://github.com/carlesllavata/Open3D)
 suite of open-source tools for 3D work.
 
-**Version 0.1.1** – what each version changed is in the [CHANGELOG](CHANGELOG.md).
+**Version 0.2.0** – what each version changed is in the [CHANGELOG](CHANGELOG.md).
 
 Engines: **Corona**, **V-Ray**, **V-Ray GPU** and **FStorm** in 3ds Max; **Cycles** (CPU, CUDA, OptiX, HIP,
 oneAPI) and **Eevee** in Blender.

@@ -2,7 +2,7 @@
 schema_version = "1.0.0"
 
 id = "openfarm"
-version = "0.1.1"
+version = "0.2.0"
 name = "OpenFarm"
 tagline = "Send scenes to the OpenFarm render farm"
 maintainer = "OpenFarm contributors"

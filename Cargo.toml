@@ -19,7 +19,7 @@ todo = "warn"
 
 [package]
 name = "openfarm"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 description = "Local render farm for 3ds Max and Blender (V-Ray, Corona, FStorm, Cycles, Eevee)"
 license = "GPL-3.0-or-later"

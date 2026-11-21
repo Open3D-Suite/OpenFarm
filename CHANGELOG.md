@@ -2,7 +2,7 @@
 
 What changed for users in each version of OpenFarm, newest first.
 
-## In development
+## 0.2.0 — 21 November 2026
 
 **Not compatible with 0.1.1.** Update every computer of the farm at the same time, then approve the
 machines again on the farm's computer (*Machines*).
