@@ -63,12 +63,12 @@ machines again on the farm's computer (*Machines*).
 
 - **Nothing else to install.** The Visual C++ runtime is now inside `OpenFarm.exe`, so it starts on a
   Windows that has no Visual C++ Redistributable.
-- **An installer is on its way.** Each release also carries `openfarm-<version>-windows-x64.msi`, which
-  installs OpenFarm for everyone on the computer in `C:\Program Files\Open3D\OpenFarm`, with a shortcut
-  in the Start menu; Windows asks for permission first. It adds no firewall rule: the first time OpenFarm
-  runs from there, Windows may ask once to let it through its firewall; the README says how to remove the
-  rules of the copy you had before. The Open3D launcher will use it in a coming version; the zip stays
-  as it is.
+- **An installer for everyone on the computer.** Each release now also carries
+  `openfarm-<version>-windows-x64.msi`, which installs OpenFarm in `C:\Program Files\Open3D\OpenFarm`,
+  with a shortcut in the Start menu. Windows asks for permission first and names an "Unknown publisher",
+  as the package is not signed yet. It adds no firewall rule: the first time OpenFarm runs from there,
+  Windows may ask once to let it through its firewall; the README says how to remove the rules of the
+  copy you had before. The Open3D launcher will use it from its version 0.4.0; the zip stays as it is.
 
 - **An open window no longer asks the farm without a pause.** The window is meant to wait until
   something changes on the farm. Since the first version it asked again at once, about a thousand times
