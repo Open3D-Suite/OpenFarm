@@ -23,7 +23,7 @@ version = "0.2.0"
 edition = "2024"
 description = "Local render farm for 3ds Max and Blender (V-Ray, Corona, FStorm, Cycles, Eevee)"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/carlesllavata/OpenFarm"
+repository = "https://github.com/Open3D-Suite/OpenFarm"
 publish = false
 build = "build.rs"
 

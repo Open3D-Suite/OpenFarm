@@ -2,7 +2,7 @@
 
 A render farm for your own computers. Send a scene from **3ds Max** or **Blender** and OpenFarm renders it
 on every machine of the office or the studio, checks every frame and shows the progress in one window.
-No accounts, no licence keys, no cloud. Part of the [Open3D](https://github.com/carlesllavata/Open3D)
+No accounts, no licence keys, no cloud. Part of the [Open3D](https://github.com/Open3D-Suite/Open3D)
 suite of open-source tools for 3D work.
 
 **Version 0.2.0** – what each version changed is in the [CHANGELOG](CHANGELOG.md).
@@ -40,12 +40,12 @@ oneAPI) and **Eevee** in Blender.
 OpenFarm is a single program for Windows 10/11 (64-bit), installed on every computer of the farm. Two
 ways:
 
-- **With the [Open3D launcher](https://github.com/carlesllavata/Open3D)** (0.4.0 or later): press
+- **With the [Open3D launcher](https://github.com/Open3D-Suite/Open3D)** (0.4.0 or later): press
   *Install* on OpenFarm's card. The launcher installs OpenFarm for everyone on the computer in
   `C:\Program Files\Open3D\OpenFarm`, with a shortcut in the Start menu, and updates it and removes it.
   Windows asks for permission at each install and update, and names an "Unknown publisher": OpenFarm's
   packages are not signed yet.
-- **By hand**, from the [releases page](https://github.com/carlesllavata/OpenFarm/releases/latest):
+- **By hand**, from the [releases page](https://github.com/Open3D-Suite/OpenFarm/releases/latest):
   - `openfarm-<version>-windows-x64.msi` installs it the same way, with the same question from Windows;
     the MSI of a newer version replaces the version installed.
   - `openfarm-<version>-windows-x64.zip` needs no installing: unzip it anywhere and run `OpenFarm.exe`.
