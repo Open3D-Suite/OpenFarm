@@ -69,6 +69,8 @@ as a change that makes it old.
 
 ## Rules of this code
 
+- A bug that is fixed comes with a test that fails without the fix, and new logic comes with its tests.
+  The interface is tried by hand before a release.
 - From the network the server obeys only signed requests (`src/auth.rs`): `/api/v1` needs the signature of
   an approved machine's key pair, and an agent signs the request that opens its WebSocket.
 - A machine's private key is in its `config.json`, encrypted with Windows DPAPI (`src/dpapi.rs`).
