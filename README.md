@@ -83,7 +83,8 @@ paths.
 ### What each machine needs
 
 - The render software of the jobs it should take, installed and licensed: 3ds Max 2025 or later with
-  the renderer, or Blender. OpenFarm finds them by itself and only gives a machine jobs it can render.
+  the renderer (tested with 3ds Max 2027; 2025 and 2026 should work but are not tested), or Blender.
+  OpenFarm finds them by itself and only gives a machine jobs it can render.
 - Renderer licences for rendering without a user interface: V-Ray asks for a **render node** licence
   when 3ds Max renders in batch mode.
 - An NVIDIA GPU for GPU engines (V-Ray GPU, FStorm, Cycles on CUDA/OptiX, Eevee). Each GPU takes its own
